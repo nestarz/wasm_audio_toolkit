@@ -56,7 +56,7 @@ extern "C"
     //
     const AVOutputFormat *out_fmt = throw_if_null(av_guess_format(format_short_name, NULL, NULL), "Output format not recognized");
     AVFormatContext *format_ctx = nullptr;
-    throw_if_neg(avformat_alloc_output_context2(&format_ctx, out_fmt, nullptr, nullptr), "Failed to allocate output context");
+    throw_if_neg(avformat_alloc_output_context2(&format_ctx, out_fmt, "wav", nullptr), "Failed to allocate output context");
     const AVCodec *codec = throw_if_null(avcodec_find_encoder(static_cast<AVCodecID>(codec_id)), "Codec not found");
     AVStream *stream = throw_if_null(avformat_new_stream(format_ctx, codec), "Failed to create a new stream");
     AVCodecContext *codec_ctx = throw_if_null(avcodec_alloc_context3(codec), "Failed to allocate codec context");
@@ -71,7 +71,7 @@ extern "C"
     throw_if_neg(avcodec_open2(codec_ctx, codec, nullptr), "Failed to open codec");
     throw_if_neg(avcodec_parameters_from_context(stream->codecpar, codec_ctx), "Failed to copy codec parameters");
 
-    std::vector<uint8_t> output_buffer(1 * 1024);
+    std::vector<uint8_t> output_buffer(16 * 1024);
     AVIOContext *avio_ctx = avio_alloc_context(output_buffer.data(), output_buffer.size(), 1, nullptr, nullptr, &custom_io_write, nullptr);
     format_ctx->pb = avio_ctx;
     format_ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
@@ -95,7 +95,7 @@ extern "C"
     throw_if_null(swr_ctx, "Failed to allocate resampler context");
     throw_if_neg(swr_init(swr_ctx), "Failed to initialize resampler context");
 
-    int frame_size_bytes = (frame->nb_samples * num_channels * av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format))) / 2;
+    int frame_size_bytes = (frame->nb_samples * num_channels * av_get_bytes_per_sample(input_format)) / 2;
     int pos = 0;
     int ret;
     while (pos + frame_size_bytes <= pcm_data_size)
