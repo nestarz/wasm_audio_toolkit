@@ -6,7 +6,7 @@ export const run = async (inputArray: any, profileId: number) => {
   const handler = await ModuleFactory({
     INITIAL_MEMORY: 2048 * 1024 * 1024, // 2048 MB in bytes
   });
-  const size = inputArray.length * 6;
+  const size = inputArray.length * 2;
   const ptr = handler._malloc(size);
   handler.HEAPU8.set(inputArray, ptr);
   const modifiedArray = new Uint8Array(
