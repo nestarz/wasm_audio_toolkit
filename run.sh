@@ -1,20 +1,26 @@
 #!/bin/bash
-FFMPEG_BUILD="build/ffmpeg"
-FFMPEG_SOURCE="deps/FFmpeg"
+FFMPEG_BUILD="$(pwd)/build/ffmpeg"
+FFMPEG_SOURCE="$(pwd)/deps/FFmpeg"
 
 function ask_remove_folder {
   read -p "Do you want to remove $1? (y/n) " answer &&
     [[ $answer =~ ^[Yy]$ ]] && rm -r $1 && echo "$1 removed." || echo "$1 removal cancelled."
 }
 
+function replace {
+  if ! grep -q "$2" "$3"; then sed -i '' "s/$1/$2 $1/g" "$3"; else echo "[replace] skip $1"; fi
+}
+
 ask_remove_folder $FFMPEG_BUILD
 [ -d $FFMPEG_BUILD ] || (
   mkdir -p $FFMPEG_BUILD
   cd $FFMPEG_SOURCE
-  export PREFIX=../../$FFMPEG_BUILD
+  export CFLAGS="-I/opt/homebrew/include"
+  export CFLAGS="$CFLAGS -UHAVE_UNISTD_H"
   export LDFLAGS="$CFLAGS -s INITIAL_MEMORY=33554432" # -L${PREFIX}/lib
+  replace "if (read_random" "return get_generic_seed(); \/\* _NOSYS_ \*\/" "$FFMPEG_SOURCE/libavutil/random_seed.c"
   emconfigure ./configure \
-    --prefix=$PREFIX \
+    --prefix=$FFMPEG_BUILD \
     --enable-cross-compile \
     --target-os=none \
     --arch=x86_32 \
@@ -72,8 +78,8 @@ ask_remove_folder $FFMPEG_BUILD
   emmake make install
 )
 
-em++ main.cpp ./build/ffmpeg/lib/*.a \
-  -I ./build/ffmpeg/include \
+em++ main.cpp $FFMPEG_BUILD/lib/*.a \
+  -I $FFMPEG_BUILD/include \
   -o ./dist/main.js \
   -s STRICT=1 \
   -s ALLOW_MEMORY_GROWTH=1 \

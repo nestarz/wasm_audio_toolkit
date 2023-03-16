@@ -29,18 +29,29 @@ int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
 extern "C"
 {
   EMSCRIPTEN_KEEPALIVE
-  int modify_array(uint8_t *array, int size, int format_short_name_id)
+  int modify_array(uint8_t *array, int size, int profile_id)
   {
     //
     const int pcm_data_size = size;
     const uint8_t *pcm_data = array;
     //
-    const AVSampleFormat input_format = AV_SAMPLE_FMT_S16;
-    const int codec_id = format_short_name_id == 0 ? AV_CODEC_ID_AAC : AV_CODEC_ID_MP2;
     const int num_channels = 1;
-    const char *format_short_name = format_short_name_id == 0 ? "adts" : "mp2";
+    const AVSampleFormat input_format = AV_SAMPLE_FMT_S16;
+    const int codec_id = profile_id == 0   ? AV_CODEC_ID_AAC
+                         : profile_id == 1 ? AV_CODEC_ID_MP2
+                         : profile_id == 2 ? AV_CODEC_ID_OPUS
+                         : profile_id == 3 ? AV_CODEC_ID_MP3
+                         : profile_id == 4 ? AV_CODEC_ID_OPUS
+                                           : NULL;
+    const char *format_short_name = profile_id == 0   ? "adts"
+                                    : profile_id == 1 ? "mp2"
+                                    : profile_id == 2 ? "webm"
+                                    : profile_id == 3 ? "mp3"
+                                    : profile_id == 4 ? "ogg"
+                                                      : nullptr;
+    printf("%s\n", format_short_name);
     const int sample_rate = 8000;
-    const int out_sample_rate = 16000;
+    const int out_sample_rate = codec_id == AV_CODEC_ID_OPUS ? 48000 : 16000;
     const int out_bit_rate = 32000;
     //
     const AVOutputFormat *out_fmt = throw_if_null(av_guess_format(format_short_name, NULL, NULL), "Output format not recognized");
@@ -49,6 +60,7 @@ extern "C"
     const AVCodec *codec = throw_if_null(avcodec_find_encoder(static_cast<AVCodecID>(codec_id)), "Codec not found");
     AVStream *stream = throw_if_null(avformat_new_stream(format_ctx, codec), "Failed to create a new stream");
     AVCodecContext *codec_ctx = throw_if_null(avcodec_alloc_context3(codec), "Failed to allocate codec context");
+    codec_ctx->strict_std_compliance = -2;
     AVChannelLayout src_ch_layout;
     (num_channels == 1) ? src_ch_layout = AV_CHANNEL_LAYOUT_MONO : src_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
     throw_if_neg(av_channel_layout_copy(&codec_ctx->ch_layout, &src_ch_layout), "Could not select channel layout");

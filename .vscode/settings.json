@@ -1,0 +1,13 @@
+{
+  "files.associations": {
+    "stdexcept": "cpp",
+    "vector": "cpp",
+    "iosfwd": "cpp",
+    "__tuple": "cpp",
+    "array": "cpp",
+    "unistd.h": "c",
+    "opusenc.h": "c",
+    "libopus.h": "c",
+    "opus.h": "c"
+  }
+}
