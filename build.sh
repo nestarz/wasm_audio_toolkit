@@ -5,6 +5,8 @@ FFMPEG_BUILD="$(pwd)/build/ffmpeg"
 FFMPEG_SOURCE="$(pwd)/deps/FFmpeg"
 OPUS_BUILD="$(pwd)/build/opus"
 OPUS_SOURCE="$(pwd)/deps/opus"
+FDKAAC_BUILD="$(pwd)/build/fdk-aac"
+FDKAAC_SOURCE="$(pwd)/deps/fdk-aac"
 
 function ask_remove_folder {
   read -p "Do you want to remove $1? (y/n) " answer &&
@@ -14,6 +16,25 @@ function ask_remove_folder {
 function replace {
   if ! grep -q "$2" "$3"; then sed -i '' "s/$1/$2 $1/g" "$3"; else echo "[replace] skip $1"; fi
 }
+
+ask_remove_folder $FDKAAC_BUILD
+[ -d $FDKAAC_BUILD ] || (
+  rm -rf $FDKAAC_BUILD || true
+  mkdir -p $FDKAAC_BUILD
+  cd $FDKAAC_BUILD
+  CONF_FLAGS=(
+    --prefix=$FDKAAC_BUILD # install library in a build directory for FFmpeg to include
+    --host=x86_64-linux
+    --disable-shared              # disable shared library
+    --disable-dependency-tracking # speedup one-time build
+  )
+  echo "CONF_FLAGS=${CONF_FLAGS[@]}"
+  (cd $FDKAAC_SOURCE &&
+    emconfigure ./autogen.sh &&
+    CFLAGS=$CFLAGS emconfigure ./configure "${CONF_FLAGS[@]}")
+  emmake make -C $FDKAAC_SOURCE clean
+  emmake make -C $FDKAAC_SOURCE install -j
+)
 
 ask_remove_folder $OPUS_BUILD
 [ -d $OPUS_BUILD ] || (
@@ -42,9 +63,9 @@ ask_remove_folder $FFMPEG_BUILD
 [ -d $FFMPEG_BUILD ] || (
   mkdir -p $FFMPEG_BUILD
   cd $FFMPEG_SOURCE
-  export CFLAGS="-I/opt/homebrew/include -I$OPUS_BUILD/include"
-  export LDFLAGS="-L$OPUS_BUILD/lib -s INITIAL_MEMORY=33554432" # -L${PREFIX}/lib
-  export EM_PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$OPUS_BUILD/lib/pkgconfig"
+  export CFLAGS="-I/opt/homebrew/include -I$OPUS_BUILD/include -I$FDKAAC_BUILD/include"
+  export LDFLAGS="-L$OPUS_BUILD/lib -L$FDKAAC/lib -s INITIAL_MEMORY=33554432" # -L${PREFIX}/lib
+  export EM_PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$OPUS_BUILD/lib/pkgconfig:$FDKAAC_BUILD/lib/pkgconfig"
   replace "if (read_random" "return get_generic_seed(); \/\* _NOSYS_ \*\/" "$FFMPEG_SOURCE/libavutil/random_seed.c"
   emconfigure ./configure \
     --prefix=$FFMPEG_BUILD \
@@ -97,7 +118,8 @@ ask_remove_folder $FFMPEG_BUILD
     --enable-avformat \
     \
     --enable-libopus \
-    --enable-encoder=libopus,aac,mp2 \
+    --enable-libfdk-aac \
+    --enable-encoder=libopus,libfdk_aac,mp2 \
     --enable-muxer=webm,ogg,adts,mp2
   # \
   #
@@ -105,7 +127,7 @@ ask_remove_folder $FFMPEG_BUILD
   emmake make install
 )
 
-em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a \
+em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
   -I $FFMPEG_BUILD/include \
   -o ./dist/main.js \
   -s STRICT=1 \
@@ -117,7 +139,7 @@ em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a \
   -s IMPORTED_MEMORY \
   -s MALLOC=emmalloc \
   -s USE_ES6_IMPORT_META=1 \
-  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_modify_array']" \
+  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_encode_mux']" \
   -s EXPORTED_RUNTIME_METHODS=stringToUTF8 \
   -g4 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=1 -s DEMANGLE_SUPPORT=1 \
   -s NO_DISABLE_EXCEPTION_CATCHING

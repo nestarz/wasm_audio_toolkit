@@ -29,13 +29,11 @@ int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
 extern "C"
 {
   EMSCRIPTEN_KEEPALIVE
-  int modify_array(uint8_t *array, int size, int profile_id)
+  int encode_mux(uint8_t *array, const int size, const int sample_rate, const int num_channels, const int profile_id)
   {
     //
     const int pcm_data_size = size;
-    const uint8_t *pcm_data = array;
     //
-    const int num_channels = 1;
     const AVSampleFormat input_format = AV_SAMPLE_FMT_S16;
     const int codec_id = profile_id == 0   ? AV_CODEC_ID_AAC
                          : profile_id == 1 ? AV_CODEC_ID_MP2
@@ -50,7 +48,6 @@ extern "C"
                                     : profile_id == 4 ? "ogg"
                                                       : nullptr;
     printf("%s\n", format_short_name);
-    const int sample_rate = 8000;
     const int out_sample_rate = 16000;
     const int out_bit_rate = 32000;
     //
@@ -100,7 +97,7 @@ extern "C"
     int ret;
     while (pos + frame_size_bytes <= pcm_data_size)
     {
-      const uint8_t *tmp_ptr = pcm_data + pos;
+      const uint8_t *tmp_ptr = array + pos;
       throw_if_neg(swr_convert(swr_ctx, frame->data, frame->nb_samples,
                                &tmp_ptr, frame->nb_samples),
                    "Failed to convert samples");

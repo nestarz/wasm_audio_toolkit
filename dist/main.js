@@ -15,7 +15,7 @@ Module["ready"] = new Promise(function(resolve, reject) {
  readyPromiseReject = reject;
 });
 
-[ "_malloc", "_free", "_modify_array", "getExceptionMessage", "___get_exception_message", "_fflush", "onRuntimeInitialized" ].forEach(prop => {
+[ "_malloc", "_free", "_encode_mux", "getExceptionMessage", "___get_exception_message", "_fflush", "onRuntimeInitialized" ].forEach(prop => {
  if (!Object.getOwnPropertyDescriptor(Module["ready"], prop)) {
   Object.defineProperty(Module["ready"], prop, {
    get: () => abort("You are getting " + prop + " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"),
@@ -2079,7 +2079,7 @@ var ___wasm_call_ctors = createExportWrapper("__wasm_call_ctors");
 
 var getTempRet0 = createExportWrapper("getTempRet0");
 
-var _modify_array = Module["_modify_array"] = createExportWrapper("modify_array");
+var _encode_mux = Module["_encode_mux"] = createExportWrapper("encode_mux");
 
 var ___cxa_free_exception = createExportWrapper("__cxa_free_exception");
 
@@ -2134,8 +2134,6 @@ var ___cxa_can_catch = createExportWrapper("__cxa_can_catch");
 var ___cxa_is_pointer_type = createExportWrapper("__cxa_is_pointer_type");
 
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji");
-
-var dynCall_iiijiiii = Module["dynCall_iiijiiii"] = createExportWrapper("dynCall_iiijiiii");
 
 var dynCall_viiijj = Module["dynCall_viiijj"] = createExportWrapper("dynCall_viiijj");
 
