@@ -15,7 +15,7 @@ Module["ready"] = new Promise(function(resolve, reject) {
  readyPromiseReject = reject;
 });
 
-[ "_malloc", "_free", "_encode_mux", "getExceptionMessage", "___get_exception_message", "_fflush", "onRuntimeInitialized" ].forEach(prop => {
+[ "_malloc", "_free", "_transcode", "getExceptionMessage", "___get_exception_message", "_fflush", "onRuntimeInitialized" ].forEach(prop => {
  if (!Object.getOwnPropertyDescriptor(Module["ready"], prop)) {
   Object.defineProperty(Module["ready"], prop, {
    get: () => abort("You are getting " + prop + " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"),
@@ -2060,7 +2060,6 @@ var wasmImports = {
  "invoke_iii": invoke_iii,
  "invoke_iiii": invoke_iiii,
  "invoke_iiiii": invoke_iiiii,
- "invoke_iiiiii": invoke_iiiiii,
  "invoke_iiiiiiii": invoke_iiiiiiii,
  "invoke_iiiiiiiiii": invoke_iiiiiiiiii,
  "invoke_v": invoke_v,
@@ -2079,7 +2078,7 @@ var ___wasm_call_ctors = createExportWrapper("__wasm_call_ctors");
 
 var getTempRet0 = createExportWrapper("getTempRet0");
 
-var _encode_mux = Module["_encode_mux"] = createExportWrapper("encode_mux");
+var _transcode = Module["_transcode"] = createExportWrapper("transcode");
 
 var ___cxa_free_exception = createExportWrapper("__cxa_free_exception");
 
@@ -2134,6 +2133,12 @@ var ___cxa_can_catch = createExportWrapper("__cxa_can_catch");
 var ___cxa_is_pointer_type = createExportWrapper("__cxa_is_pointer_type");
 
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji");
+
+var dynCall_iiiji = Module["dynCall_iiiji"] = createExportWrapper("dynCall_iiiji");
+
+var dynCall_jiiij = Module["dynCall_jiiij"] = createExportWrapper("dynCall_jiiij");
+
+var dynCall_jiiji = Module["dynCall_jiiji"] = createExportWrapper("dynCall_jiiji");
 
 var dynCall_viiijj = Module["dynCall_viiijj"] = createExportWrapper("dynCall_viiijj");
 
@@ -2196,17 +2201,6 @@ function invoke_iiiiiiii(index, a1, a2, a3, a4, a5, a6, a7) {
  }
 }
 
-function invoke_i(index) {
- var sp = stackSave();
- try {
-  return getWasmTableEntry(index)();
- } catch (e) {
-  stackRestore(sp);
-  if (!(e instanceof EmscriptenEH)) throw e;
-  _setThrew(1, 0);
- }
-}
-
 function invoke_iiiiiiiiii(index, a1, a2, a3, a4, a5, a6, a7, a8, a9) {
  var sp = stackSave();
  try {
@@ -2229,10 +2223,10 @@ function invoke_ii(index, a1) {
  }
 }
 
-function invoke_iiiiii(index, a1, a2, a3, a4, a5) {
+function invoke_i(index) {
  var sp = stackSave();
  try {
-  return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
+  return getWasmTableEntry(index)();
  } catch (e) {
   stackRestore(sp);
   if (!(e instanceof EmscriptenEH)) throw e;

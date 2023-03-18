@@ -119,8 +119,10 @@ ask_remove_folder $FFMPEG_BUILD
     \
     --enable-libopus \
     --enable-libfdk-aac \
-    --enable-encoder=libopus,libfdk_aac,mp2 \
-    --enable-muxer=webm,ogg,adts,mp2
+    --enable-encoder=libopus,libfdk_aac,mp2,pcm_s16le \
+    --enable-decoder=libopus,libfdk_aac,mp2,pcm_s16le \
+    --enable-muxer=wav,webm,ogg,adts,mp2 \
+    --enable-demuxer=wav,webm,ogg,adts,mp2
   # \
   #
   emmake make -j8
@@ -139,7 +141,7 @@ em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
   -s IMPORTED_MEMORY \
   -s MALLOC=emmalloc \
   -s USE_ES6_IMPORT_META=1 \
-  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_encode_mux']" \
+  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_transcode']" \
   -s EXPORTED_RUNTIME_METHODS=stringToUTF8 \
   -g4 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=1 -s DEMANGLE_SUPPORT=1 \
   -s NO_DISABLE_EXCEPTION_CATCHING
