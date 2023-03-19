@@ -6,7 +6,7 @@ const createMalloc = (handler) => {
     (arrOrString) => {
       const inputArray =
         typeof arrOrString === "string"
-          ? new TextEncoder().encode(arrOrString)
+          ? new TextEncoder().encode(arrOrString + "\0")
           : arrOrString;
       const size = inputArray.length;
       const ptr = handler._malloc(size);
@@ -52,6 +52,9 @@ if (import.meta.main) {
   const data = await fetch(new URL("./assets/pcm1608m.wav", import.meta.url))
     .then((r) => r.arrayBuffer())
     .then((v) => new Uint8Array(v));
+  await run(data, "wav", "adts", "libfdk_aac").then((res) =>
+    Deno.writeFile("./dist/out.aac", res)
+  );
   await run(data, "wav", "ogg", "libopus").then((res) =>
     Deno.writeFile("./dist/out.ogg", res)
   );
@@ -60,8 +63,5 @@ if (import.meta.main) {
   );
   await run(data, "wav", "webm", "libopus").then((res) =>
     Deno.writeFile("./dist/out.webm", res)
-  );
-  await run(data, "wav", "adts", "aac").then((res) =>
-    Deno.writeFile("./dist/out.aac", res)
   );
 }
