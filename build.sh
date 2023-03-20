@@ -138,6 +138,8 @@ ask_remove_folder $FFMPEG_BUILD
     --enable-avcodec \
     --enable-swresample \
     --enable-avformat \
+    --enable-avfilter \
+    --enable-filter=anull \
     \
     --enable-libopus \
     --enable-libfdk-aac \
