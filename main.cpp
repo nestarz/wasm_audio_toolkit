@@ -115,6 +115,7 @@ extern "C"
     swr_alloc_set_opts2(&swr_ctx,
                         &enc_ctx->ch_layout, enc_ctx->sample_fmt, enc_ctx->sample_rate,
                         &dec_ctx->ch_layout, dec_ctx->sample_fmt, dec_ctx->sample_rate, 0, nullptr);
+    swr_set_compensation(swr_ctx, (enc_ctx->frame_size - dec_ctx->frame_size) * enc_ctx->sample_rate / dec_ctx->sample_rate, enc_ctx->frame_size);
     throw_if_null(swr_ctx, "Failed to allocate resampler context");
     throw_if_neg(swr_init(swr_ctx), "Failed to initialize resampler context");
 
@@ -150,34 +151,41 @@ extern "C"
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
           break;
         throw_if_neg(ret, "Failed to receive frame from decoder");
-        AVFrame *out_frame = av_frame_clone(frame);
-        out_frame->sample_rate = enc_ctx->sample_rate;
-        throw_if_neg(swr_convert_frame(swr_ctx, out_frame, frame), "Failed to resample frame");
-        out_frame->nb_samples = enc_ctx->frame_size;
-        out_frame->format = enc_ctx->sample_fmt;
 
-        // sends an uncompressed frame from the encoder to the muxer (muxer2) for encoding
-        // enc_ctx <-- out_frame
-        pkt->data = nullptr;
-        pkt->size = 0;
-        throw_if_neg(avcodec_send_frame(enc_ctx, out_frame), "Failed to send frame to encoder");
-        while (true)
+        int input_samples = frame->nb_samples;
+        int output_samples = enc_ctx->frame_size;
+        for (int i = 0; i < input_samples; i += output_samples)
         {
-          const int ret = avcodec_receive_packet(enc_ctx, pkt);
-          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            break;
-          throw_if_neg(ret, "Failed to receive packet.");
-          av_packet_rescale_ts(pkt, enc_ctx->time_base, out_stream->time_base);
-          pkt->stream_index = out_stream->index;
-          throw_if_neg(av_interleaved_write_frame(output_ctx, pkt), "Failed to write frame");
-          av_packet_unref(pkt);
-        }
-        av_frame_unref(frame);
-        av_frame_unref(out_frame);
-      }
-      av_packet_unref(pkt);
-    }
+          AVFrame *out_frame = av_frame_alloc();
+          out_frame->nb_samples = FFMIN(output_samples, input_samples - i);
+          out_frame->format = enc_ctx->sample_fmt;
+          throw_if_neg(av_channel_layout_copy(&out_frame->ch_layout, &enc_ctx->ch_layout), "Could not select channel layout");
+          throw_if_neg(av_frame_get_buffer(out_frame, 0), "Failed to allocate output frame buffer");
+          printf("out_frame->nb_samples: %d, frame->nb_samples: %d\n", out_frame->nb_samples, frame->nb_samples);
+          throw_if_neg(swr_convert(swr_ctx, out_frame->data, out_frame->nb_samples, (const uint8_t **)frame->data + i, frame->nb_samples), "Failed to resample frame");
 
+          // sends an uncompressed frame from the encoder to the muxer (muxer2) for encoding
+          // enc_ctx <-- out_frame
+          pkt->data = nullptr;
+          pkt->size = 0;
+          throw_if_neg(avcodec_send_frame(enc_ctx, out_frame), "Failed to send frame to encoder");
+          while (true)
+          {
+            const int ret = avcodec_receive_packet(enc_ctx, pkt);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+              break;
+            throw_if_neg(ret, "Failed to receive packet.");
+            av_packet_rescale_ts(pkt, enc_ctx->time_base, out_stream->time_base);
+            pkt->stream_index = out_stream->index;
+            throw_if_neg(av_interleaved_write_frame(output_ctx, pkt), "Failed to write frame");
+            av_packet_unref(pkt);
+          }
+          av_frame_unref(frame);
+          av_frame_unref(out_frame);
+        }
+        av_packet_unref(pkt);
+      }
+    }
     // Flush encoder
     // AVPacket *pkt = throw_if_null(av_packet_alloc(), "av_packet_alloc failed");
     // throw_if_neg(avcodec_send_frame(enc_ctx, nullptr), "Failed to send empty frame to encoder");
