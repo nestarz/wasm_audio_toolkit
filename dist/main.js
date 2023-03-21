@@ -15,7 +15,11 @@ Module["ready"] = new Promise(function(resolve, reject) {
  readyPromiseReject = reject;
 });
 
+<<<<<<< Updated upstream
 [ "_malloc", "_free", "_encode_mux", "getExceptionMessage", "___get_exception_message", "_fflush", "onRuntimeInitialized" ].forEach(prop => {
+=======
+[ "_malloc", "_free", "_transcode", "_probe", "getExceptionMessage", "___get_exception_message", "_fflush", "___getTypeName", "__embind_initialize_bindings", "onRuntimeInitialized" ].forEach(prop => {
+>>>>>>> Stashed changes
  if (!Object.getOwnPropertyDescriptor(Module["ready"], prop)) {
   Object.defineProperty(Module["ready"], prop, {
    get: () => abort("You are getting " + prop + " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"),
@@ -1433,6 +1437,692 @@ function ___cxa_throw(ptr, type, destructor) {
  throw new CppException(ptr);
 }
 
+function __embind_register_bigint(primitiveType, name, size, minRange, maxRange) {}
+
+function getShiftFromSize(size) {
+ switch (size) {
+ case 1:
+  return 0;
+
+ case 2:
+  return 1;
+
+ case 4:
+  return 2;
+
+ case 8:
+  return 3;
+
+ default:
+  throw new TypeError("Unknown type size: " + size);
+ }
+}
+
+function embind_init_charCodes() {
+ var codes = new Array(256);
+ for (var i = 0; i < 256; ++i) {
+  codes[i] = String.fromCharCode(i);
+ }
+ embind_charCodes = codes;
+}
+
+var embind_charCodes = undefined;
+
+function readLatin1String(ptr) {
+ var ret = "";
+ var c = ptr;
+ while (SAFE_HEAP_LOAD(c, 1, 1)) {
+  ret += embind_charCodes[SAFE_HEAP_LOAD(c++, 1, 1)];
+ }
+ return ret;
+}
+
+var awaitingDependencies = {};
+
+var registeredTypes = {};
+
+var typeDependencies = {};
+
+var char_0 = 48;
+
+var char_9 = 57;
+
+function makeLegalFunctionName(name) {
+ if (undefined === name) {
+  return "_unknown";
+ }
+ name = name.replace(/[^a-zA-Z0-9_]/g, "$");
+ var f = name.charCodeAt(0);
+ if (f >= char_0 && f <= char_9) {
+  return "_" + name;
+ }
+ return name;
+}
+
+function createNamedFunction(name, body) {
+ name = makeLegalFunctionName(name);
+ return {
+  [name]: function() {
+   return body.apply(this, arguments);
+  }
+ }[name];
+}
+
+function extendError(baseErrorType, errorName) {
+ var errorClass = createNamedFunction(errorName, function(message) {
+  this.name = errorName;
+  this.message = message;
+  var stack = new Error(message).stack;
+  if (stack !== undefined) {
+   this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+  }
+ });
+ errorClass.prototype = Object.create(baseErrorType.prototype);
+ errorClass.prototype.constructor = errorClass;
+ errorClass.prototype.toString = function() {
+  if (this.message === undefined) {
+   return this.name;
+  } else {
+   return this.name + ": " + this.message;
+  }
+ };
+ return errorClass;
+}
+
+var BindingError = undefined;
+
+function throwBindingError(message) {
+ throw new BindingError(message);
+}
+
+var InternalError = undefined;
+
+function throwInternalError(message) {
+ throw new InternalError(message);
+}
+
+function whenDependentTypesAreResolved(myTypes, dependentTypes, getTypeConverters) {
+ myTypes.forEach(function(type) {
+  typeDependencies[type] = dependentTypes;
+ });
+ function onComplete(typeConverters) {
+  var myTypeConverters = getTypeConverters(typeConverters);
+  if (myTypeConverters.length !== myTypes.length) {
+   throwInternalError("Mismatched type converter count");
+  }
+  for (var i = 0; i < myTypes.length; ++i) {
+   registerType(myTypes[i], myTypeConverters[i]);
+  }
+ }
+ var typeConverters = new Array(dependentTypes.length);
+ var unregisteredTypes = [];
+ var registered = 0;
+ dependentTypes.forEach((dt, i) => {
+  if (registeredTypes.hasOwnProperty(dt)) {
+   typeConverters[i] = registeredTypes[dt];
+  } else {
+   unregisteredTypes.push(dt);
+   if (!awaitingDependencies.hasOwnProperty(dt)) {
+    awaitingDependencies[dt] = [];
+   }
+   awaitingDependencies[dt].push(() => {
+    typeConverters[i] = registeredTypes[dt];
+    ++registered;
+    if (registered === unregisteredTypes.length) {
+     onComplete(typeConverters);
+    }
+   });
+  }
+ });
+ if (0 === unregisteredTypes.length) {
+  onComplete(typeConverters);
+ }
+}
+
+function registerType(rawType, registeredInstance, options = {}) {
+ if (!("argPackAdvance" in registeredInstance)) {
+  throw new TypeError("registerType registeredInstance requires argPackAdvance");
+ }
+ var name = registeredInstance.name;
+ if (!rawType) {
+  throwBindingError('type "' + name + '" must have a positive integer typeid pointer');
+ }
+ if (registeredTypes.hasOwnProperty(rawType)) {
+  if (options.ignoreDuplicateRegistrations) {
+   return;
+  } else {
+   throwBindingError("Cannot register type '" + name + "' twice");
+  }
+ }
+ registeredTypes[rawType] = registeredInstance;
+ delete typeDependencies[rawType];
+ if (awaitingDependencies.hasOwnProperty(rawType)) {
+  var callbacks = awaitingDependencies[rawType];
+  delete awaitingDependencies[rawType];
+  callbacks.forEach(cb => cb());
+ }
+}
+
+function __embind_register_bool(rawType, name, size, trueValue, falseValue) {
+ var shift = getShiftFromSize(size);
+ name = readLatin1String(name);
+ registerType(rawType, {
+  name: name,
+  "fromWireType": function(wt) {
+   return !!wt;
+  },
+  "toWireType": function(destructors, o) {
+   return o ? trueValue : falseValue;
+  },
+  "argPackAdvance": 8,
+  "readValueFromPointer": function(pointer) {
+   var heap;
+   if (size === 1) {
+    heap = HEAP8;
+   } else if (size === 2) {
+    heap = HEAP16;
+   } else if (size === 4) {
+    heap = HEAP32;
+   } else {
+    throw new TypeError("Unknown boolean type size: " + name);
+   }
+   return this["fromWireType"](heap[pointer >> shift]);
+  },
+  destructorFunction: null
+ });
+}
+
+var emval_free_list = [];
+
+var emval_handle_array = [ {}, {
+ value: undefined
+}, {
+ value: null
+}, {
+ value: true
+}, {
+ value: false
+} ];
+
+function __emval_decref(handle) {
+ if (handle > 4 && 0 === --emval_handle_array[handle].refcount) {
+  emval_handle_array[handle] = undefined;
+  emval_free_list.push(handle);
+ }
+}
+
+function count_emval_handles() {
+ var count = 0;
+ for (var i = 5; i < emval_handle_array.length; ++i) {
+  if (emval_handle_array[i] !== undefined) {
+   ++count;
+  }
+ }
+ return count;
+}
+
+function get_first_emval() {
+ for (var i = 5; i < emval_handle_array.length; ++i) {
+  if (emval_handle_array[i] !== undefined) {
+   return emval_handle_array[i];
+  }
+ }
+ return null;
+}
+
+function init_emval() {
+ Module["count_emval_handles"] = count_emval_handles;
+ Module["get_first_emval"] = get_first_emval;
+}
+
+var Emval = {
+ toValue: handle => {
+  if (!handle) {
+   throwBindingError("Cannot use deleted val. handle = " + handle);
+  }
+  return emval_handle_array[handle].value;
+ },
+ toHandle: value => {
+  switch (value) {
+  case undefined:
+   return 1;
+
+  case null:
+   return 2;
+
+  case true:
+   return 3;
+
+  case false:
+   return 4;
+
+  default:
+   {
+    var handle = emval_free_list.length ? emval_free_list.pop() : emval_handle_array.length;
+    emval_handle_array[handle] = {
+     refcount: 1,
+     value: value
+    };
+    return handle;
+   }
+  }
+ }
+};
+
+function simpleReadValueFromPointer(pointer) {
+ return this["fromWireType"](SAFE_HEAP_LOAD((pointer >> 2) * 4, 4, 0));
+}
+
+function __embind_register_emval(rawType, name) {
+ name = readLatin1String(name);
+ registerType(rawType, {
+  name: name,
+  "fromWireType": function(handle) {
+   var rv = Emval.toValue(handle);
+   __emval_decref(handle);
+   return rv;
+  },
+  "toWireType": function(destructors, value) {
+   return Emval.toHandle(value);
+  },
+  "argPackAdvance": 8,
+  "readValueFromPointer": simpleReadValueFromPointer,
+  destructorFunction: null
+ });
+}
+
+function embindRepr(v) {
+ if (v === null) {
+  return "null";
+ }
+ var t = typeof v;
+ if (t === "object" || t === "array" || t === "function") {
+  return v.toString();
+ } else {
+  return "" + v;
+ }
+}
+
+function floatReadValueFromPointer(name, shift) {
+ switch (shift) {
+ case 2:
+  return function(pointer) {
+   return this["fromWireType"](SAFE_HEAP_LOAD_D((pointer >> 2) * 4, 4, 0));
+  };
+
+ case 3:
+  return function(pointer) {
+   return this["fromWireType"](SAFE_HEAP_LOAD_D((pointer >> 3) * 8, 8, 0));
+  };
+
+ default:
+  throw new TypeError("Unknown float type: " + name);
+ }
+}
+
+function __embind_register_float(rawType, name, size) {
+ var shift = getShiftFromSize(size);
+ name = readLatin1String(name);
+ registerType(rawType, {
+  name: name,
+  "fromWireType": function(value) {
+   return value;
+  },
+  "toWireType": function(destructors, value) {
+   if (typeof value != "number" && typeof value != "boolean") {
+    throw new TypeError('Cannot convert "' + embindRepr(value) + '" to ' + this.name);
+   }
+   return value;
+  },
+  "argPackAdvance": 8,
+  "readValueFromPointer": floatReadValueFromPointer(name, shift),
+  destructorFunction: null
+ });
+}
+
+function integerReadValueFromPointer(name, shift, signed) {
+ switch (shift) {
+ case 0:
+  return signed ? function readS8FromPointer(pointer) {
+   return SAFE_HEAP_LOAD(pointer, 1, 0);
+  } : function readU8FromPointer(pointer) {
+   return SAFE_HEAP_LOAD(pointer, 1, 1);
+  };
+
+ case 1:
+  return signed ? function readS16FromPointer(pointer) {
+   return SAFE_HEAP_LOAD((pointer >> 1) * 2, 2, 0);
+  } : function readU16FromPointer(pointer) {
+   return SAFE_HEAP_LOAD((pointer >> 1) * 2, 2, 1);
+  };
+
+ case 2:
+  return signed ? function readS32FromPointer(pointer) {
+   return SAFE_HEAP_LOAD((pointer >> 2) * 4, 4, 0);
+  } : function readU32FromPointer(pointer) {
+   return SAFE_HEAP_LOAD((pointer >> 2) * 4, 4, 1);
+  };
+
+ default:
+  throw new TypeError("Unknown integer type: " + name);
+ }
+}
+
+function __embind_register_integer(primitiveType, name, size, minRange, maxRange) {
+ name = readLatin1String(name);
+ if (maxRange === -1) {
+  maxRange = 4294967295;
+ }
+ var shift = getShiftFromSize(size);
+ var fromWireType = value => value;
+ if (minRange === 0) {
+  var bitshift = 32 - 8 * size;
+  fromWireType = value => value << bitshift >>> bitshift;
+ }
+ var isUnsignedType = name.includes("unsigned");
+ var checkAssertions = (value, toTypeName) => {
+  if (typeof value != "number" && typeof value != "boolean") {
+   throw new TypeError('Cannot convert "' + embindRepr(value) + '" to ' + toTypeName);
+  }
+  if (value < minRange || value > maxRange) {
+   throw new TypeError('Passing a number "' + embindRepr(value) + '" from JS side to C/C++ side to an argument of type "' + name + '", which is outside the valid range [' + minRange + ", " + maxRange + "]!");
+  }
+ };
+ var toWireType;
+ if (isUnsignedType) {
+  toWireType = function(destructors, value) {
+   checkAssertions(value, this.name);
+   return value >>> 0;
+  };
+ } else {
+  toWireType = function(destructors, value) {
+   checkAssertions(value, this.name);
+   return value;
+  };
+ }
+ registerType(primitiveType, {
+  name: name,
+  "fromWireType": fromWireType,
+  "toWireType": toWireType,
+  "argPackAdvance": 8,
+  "readValueFromPointer": integerReadValueFromPointer(name, shift, minRange !== 0),
+  destructorFunction: null
+ });
+}
+
+function __embind_register_memory_view(rawType, dataTypeIndex, name) {
+ var typeMapping = [ Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array ];
+ var TA = typeMapping[dataTypeIndex];
+ function decodeMemoryView(handle) {
+  handle = handle >> 2;
+  var heap = HEAPU32;
+  var size = heap[handle];
+  var data = heap[handle + 1];
+  return new TA(heap.buffer, data, size);
+ }
+ name = readLatin1String(name);
+ registerType(rawType, {
+  name: name,
+  "fromWireType": decodeMemoryView,
+  "argPackAdvance": 8,
+  "readValueFromPointer": decodeMemoryView
+ }, {
+  ignoreDuplicateRegistrations: true
+ });
+}
+
+function __embind_register_std_string(rawType, name) {
+ name = readLatin1String(name);
+ var stdStringIsUTF8 = name === "std::string";
+ registerType(rawType, {
+  name: name,
+  "fromWireType": function(value) {
+   var length = SAFE_HEAP_LOAD((value >> 2) * 4, 4, 1);
+   var payload = value + 4;
+   var str;
+   if (stdStringIsUTF8) {
+    var decodeStartPtr = payload;
+    for (var i = 0; i <= length; ++i) {
+     var currentBytePtr = payload + i;
+     if (i == length || SAFE_HEAP_LOAD(currentBytePtr, 1, 1) == 0) {
+      var maxRead = currentBytePtr - decodeStartPtr;
+      var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+      if (str === undefined) {
+       str = stringSegment;
+      } else {
+       str += String.fromCharCode(0);
+       str += stringSegment;
+      }
+      decodeStartPtr = currentBytePtr + 1;
+     }
+    }
+   } else {
+    var a = new Array(length);
+    for (var i = 0; i < length; ++i) {
+     a[i] = String.fromCharCode(SAFE_HEAP_LOAD(payload + i, 1, 1));
+    }
+    str = a.join("");
+   }
+   _free(value);
+   return str;
+  },
+  "toWireType": function(destructors, value) {
+   if (value instanceof ArrayBuffer) {
+    value = new Uint8Array(value);
+   }
+   var length;
+   var valueIsOfTypeString = typeof value == "string";
+   if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+    throwBindingError("Cannot pass non-string to std::string");
+   }
+   if (stdStringIsUTF8 && valueIsOfTypeString) {
+    length = lengthBytesUTF8(value);
+   } else {
+    length = value.length;
+   }
+   var base = _malloc(4 + length + 1);
+   var ptr = base + 4;
+   SAFE_HEAP_STORE((base >> 2) * 4, length, 4);
+   if (stdStringIsUTF8 && valueIsOfTypeString) {
+    stringToUTF8(value, ptr, length + 1);
+   } else {
+    if (valueIsOfTypeString) {
+     for (var i = 0; i < length; ++i) {
+      var charCode = value.charCodeAt(i);
+      if (charCode > 255) {
+       _free(ptr);
+       throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+      }
+      SAFE_HEAP_STORE(ptr + i, charCode, 1);
+     }
+    } else {
+     for (var i = 0; i < length; ++i) {
+      SAFE_HEAP_STORE(ptr + i, value[i], 1);
+     }
+    }
+   }
+   if (destructors !== null) {
+    destructors.push(_free, base);
+   }
+   return base;
+  },
+  "argPackAdvance": 8,
+  "readValueFromPointer": simpleReadValueFromPointer,
+  destructorFunction: function(ptr) {
+   _free(ptr);
+  }
+ });
+}
+
+var UTF16Decoder = typeof TextDecoder != "undefined" ? new TextDecoder("utf-16le") : undefined;
+
+function UTF16ToString(ptr, maxBytesToRead) {
+ assert(ptr % 2 == 0, "Pointer passed to UTF16ToString must be aligned to two bytes!");
+ var endPtr = ptr;
+ var idx = endPtr >> 1;
+ var maxIdx = idx + maxBytesToRead / 2;
+ while (!(idx >= maxIdx) && SAFE_HEAP_LOAD(idx * 2, 2, 1)) ++idx;
+ endPtr = idx << 1;
+ if (endPtr - ptr > 32 && UTF16Decoder) return UTF16Decoder.decode(HEAPU8.subarray(ptr, endPtr));
+ var str = "";
+ for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+  var codeUnit = SAFE_HEAP_LOAD((ptr + i * 2 >> 1) * 2, 2, 0);
+  if (codeUnit == 0) break;
+  str += String.fromCharCode(codeUnit);
+ }
+ return str;
+}
+
+function stringToUTF16(str, outPtr, maxBytesToWrite) {
+ assert(outPtr % 2 == 0, "Pointer passed to stringToUTF16 must be aligned to two bytes!");
+ assert(typeof maxBytesToWrite == "number", "stringToUTF16(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!");
+ if (maxBytesToWrite === undefined) {
+  maxBytesToWrite = 2147483647;
+ }
+ if (maxBytesToWrite < 2) return 0;
+ maxBytesToWrite -= 2;
+ var startPtr = outPtr;
+ var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+ for (var i = 0; i < numCharsToWrite; ++i) {
+  var codeUnit = str.charCodeAt(i);
+  SAFE_HEAP_STORE((outPtr >> 1) * 2, codeUnit, 2);
+  outPtr += 2;
+ }
+ SAFE_HEAP_STORE((outPtr >> 1) * 2, 0, 2);
+ return outPtr - startPtr;
+}
+
+function lengthBytesUTF16(str) {
+ return str.length * 2;
+}
+
+function UTF32ToString(ptr, maxBytesToRead) {
+ assert(ptr % 4 == 0, "Pointer passed to UTF32ToString must be aligned to four bytes!");
+ var i = 0;
+ var str = "";
+ while (!(i >= maxBytesToRead / 4)) {
+  var utf32 = SAFE_HEAP_LOAD((ptr + i * 4 >> 2) * 4, 4, 0);
+  if (utf32 == 0) break;
+  ++i;
+  if (utf32 >= 65536) {
+   var ch = utf32 - 65536;
+   str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+  } else {
+   str += String.fromCharCode(utf32);
+  }
+ }
+ return str;
+}
+
+function stringToUTF32(str, outPtr, maxBytesToWrite) {
+ assert(outPtr % 4 == 0, "Pointer passed to stringToUTF32 must be aligned to four bytes!");
+ assert(typeof maxBytesToWrite == "number", "stringToUTF32(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!");
+ if (maxBytesToWrite === undefined) {
+  maxBytesToWrite = 2147483647;
+ }
+ if (maxBytesToWrite < 4) return 0;
+ var startPtr = outPtr;
+ var endPtr = startPtr + maxBytesToWrite - 4;
+ for (var i = 0; i < str.length; ++i) {
+  var codeUnit = str.charCodeAt(i);
+  if (codeUnit >= 55296 && codeUnit <= 57343) {
+   var trailSurrogate = str.charCodeAt(++i);
+   codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+  }
+  SAFE_HEAP_STORE((outPtr >> 2) * 4, codeUnit, 4);
+  outPtr += 4;
+  if (outPtr + 4 > endPtr) break;
+ }
+ SAFE_HEAP_STORE((outPtr >> 2) * 4, 0, 4);
+ return outPtr - startPtr;
+}
+
+function lengthBytesUTF32(str) {
+ var len = 0;
+ for (var i = 0; i < str.length; ++i) {
+  var codeUnit = str.charCodeAt(i);
+  if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+  len += 4;
+ }
+ return len;
+}
+
+function __embind_register_std_wstring(rawType, charSize, name) {
+ name = readLatin1String(name);
+ var decodeString, encodeString, getHeap, lengthBytesUTF, shift;
+ if (charSize === 2) {
+  decodeString = UTF16ToString;
+  encodeString = stringToUTF16;
+  lengthBytesUTF = lengthBytesUTF16;
+  getHeap = () => HEAPU16;
+  shift = 1;
+ } else if (charSize === 4) {
+  decodeString = UTF32ToString;
+  encodeString = stringToUTF32;
+  lengthBytesUTF = lengthBytesUTF32;
+  getHeap = () => HEAPU32;
+  shift = 2;
+ }
+ registerType(rawType, {
+  name: name,
+  "fromWireType": function(value) {
+   var length = SAFE_HEAP_LOAD((value >> 2) * 4, 4, 1);
+   var HEAP = getHeap();
+   var str;
+   var decodeStartPtr = value + 4;
+   for (var i = 0; i <= length; ++i) {
+    var currentBytePtr = value + 4 + i * charSize;
+    if (i == length || HEAP[currentBytePtr >> shift] == 0) {
+     var maxReadBytes = currentBytePtr - decodeStartPtr;
+     var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+     if (str === undefined) {
+      str = stringSegment;
+     } else {
+      str += String.fromCharCode(0);
+      str += stringSegment;
+     }
+     decodeStartPtr = currentBytePtr + charSize;
+    }
+   }
+   _free(value);
+   return str;
+  },
+  "toWireType": function(destructors, value) {
+   if (!(typeof value == "string")) {
+    throwBindingError("Cannot pass non-string to C++ string type " + name);
+   }
+   var length = lengthBytesUTF(value);
+   var ptr = _malloc(4 + length + charSize);
+   SAFE_HEAP_STORE((ptr >> 2) * 4, length >> shift, 4);
+   encodeString(value, ptr + 4, length + charSize);
+   if (destructors !== null) {
+    destructors.push(_free, ptr);
+   }
+   return ptr;
+  },
+  "argPackAdvance": 8,
+  "readValueFromPointer": simpleReadValueFromPointer,
+  destructorFunction: function(ptr) {
+   _free(ptr);
+  }
+ });
+}
+
+function __embind_register_void(rawType, name) {
+ name = readLatin1String(name);
+ registerType(rawType, {
+  isVoid: true,
+  name: name,
+  "argPackAdvance": 0,
+  "fromWireType": function() {
+   return undefined;
+  },
+  "toWireType": function(destructors, o) {
+   return undefined;
+  }
+ });
+}
+
 var nowIsMonotonic = true;
 
 function __emscripten_get_now_is_monotonic() {
@@ -1686,6 +2376,28 @@ function _environ_sizes_get(penviron_count, penviron_buf_size) {
  SAFE_HEAP_STORE((penviron_buf_size >> 2) * 4, bufSize, 4);
  return 0;
 }
+
+function _proc_exit(code) {
+ EXITSTATUS = code;
+ if (!keepRuntimeAlive()) {
+  if (Module["onExit"]) Module["onExit"](code);
+  ABORT = true;
+ }
+ quit_(code, new ExitStatus(code));
+}
+
+function exitJS(status, implicit) {
+ EXITSTATUS = status;
+ checkUnflushedContent();
+ if (keepRuntimeAlive() && !implicit) {
+  var msg = "program exited (with status: " + status + "), but keepRuntimeAlive() is set (counter=" + runtimeKeepaliveCounter + ") due to an async operation, so halting execution but not exiting the runtime or preventing further async execution (you can use emscripten_force_exit, if you want to force a true shutdown)";
+  readyPromiseReject(msg);
+  err(msg);
+ }
+ _proc_exit(status);
+}
+
+var _exit = exitJS;
 
 function _fd_close(fd) {
  abort("fd_close called without SYSCALLS_REQUIRE_FILESYSTEM");
@@ -2025,6 +2737,14 @@ function _strftime(s, maxsize, format, tm) {
  return bytes.length - 1;
 }
 
+embind_init_charCodes();
+
+BindingError = Module["BindingError"] = extendError(Error, "BindingError");
+
+InternalError = Module["InternalError"] = extendError(Error, "InternalError");
+
+init_emval();
+
 function checkIncomingModuleAPI() {
  ignoredModuleProp("fetchSettings");
 }
@@ -2038,6 +2758,15 @@ var wasmImports = {
  "__cxa_rethrow": ___cxa_rethrow,
  "__cxa_throw": ___cxa_throw,
  "__resumeException": ___resumeException,
+ "_embind_register_bigint": __embind_register_bigint,
+ "_embind_register_bool": __embind_register_bool,
+ "_embind_register_emval": __embind_register_emval,
+ "_embind_register_float": __embind_register_float,
+ "_embind_register_integer": __embind_register_integer,
+ "_embind_register_memory_view": __embind_register_memory_view,
+ "_embind_register_std_string": __embind_register_std_string,
+ "_embind_register_std_wstring": __embind_register_std_wstring,
+ "_embind_register_void": __embind_register_void,
  "_emscripten_get_now_is_monotonic": __emscripten_get_now_is_monotonic,
  "_gmtime_js": __gmtime_js,
  "_localtime_js": __localtime_js,
@@ -2051,6 +2780,7 @@ var wasmImports = {
  "emscripten_resize_heap": _emscripten_resize_heap,
  "environ_get": _environ_get,
  "environ_sizes_get": _environ_sizes_get,
+ "exit": _exit,
  "fd_close": _fd_close,
  "fd_fdstat_get": _fd_fdstat_get,
  "fd_seek": _fd_seek,
@@ -2079,17 +2809,27 @@ var ___wasm_call_ctors = createExportWrapper("__wasm_call_ctors");
 
 var getTempRet0 = createExportWrapper("getTempRet0");
 
+<<<<<<< Updated upstream
 var _encode_mux = Module["_encode_mux"] = createExportWrapper("encode_mux");
+=======
+var _probe = Module["_probe"] = createExportWrapper("probe");
+
+var _malloc = Module["_malloc"] = createExportWrapper("malloc");
+>>>>>>> Stashed changes
 
 var ___cxa_free_exception = createExportWrapper("__cxa_free_exception");
+
+var _transcode = Module["_transcode"] = createExportWrapper("transcode");
 
 var ___errno_location = createExportWrapper("__errno_location");
 
 var _free = Module["_free"] = createExportWrapper("free");
 
-var _malloc = Module["_malloc"] = createExportWrapper("malloc");
-
 var _fflush = Module["_fflush"] = createExportWrapper("fflush");
+
+var ___getTypeName = Module["___getTypeName"] = createExportWrapper("__getTypeName");
+
+var __embind_initialize_bindings = Module["__embind_initialize_bindings"] = createExportWrapper("_embind_initialize_bindings");
 
 var _sbrk = createExportWrapper("sbrk");
 
@@ -2174,17 +2914,6 @@ function invoke_viii(index, a1, a2, a3) {
  }
 }
 
-function invoke_iii(index, a1, a2) {
- var sp = stackSave();
- try {
-  return getWasmTableEntry(index)(a1, a2);
- } catch (e) {
-  stackRestore(sp);
-  if (!(e instanceof EmscriptenEH)) throw e;
-  _setThrew(1, 0);
- }
-}
-
 function invoke_iiiiiiii(index, a1, a2, a3, a4, a5, a6, a7) {
  var sp = stackSave();
  try {
@@ -2197,6 +2926,7 @@ function invoke_iiiiiiii(index, a1, a2, a3, a4, a5, a6, a7) {
 }
 
 function invoke_i(index) {
+<<<<<<< Updated upstream
  var sp = stackSave();
  try {
   return getWasmTableEntry(index)();
@@ -2230,6 +2960,8 @@ function invoke_ii(index, a1) {
 }
 
 function invoke_iiiiii(index, a1, a2, a3, a4, a5) {
+=======
+>>>>>>> Stashed changes
  var sp = stackSave();
  try {
   return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
@@ -2240,10 +2972,21 @@ function invoke_iiiiii(index, a1, a2, a3, a4, a5) {
  }
 }
 
-function invoke_vii(index, a1, a2) {
+function invoke_ii(index, a1) {
  var sp = stackSave();
  try {
-  getWasmTableEntry(index)(a1, a2);
+  return getWasmTableEntry(index)(a1);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
+function invoke_iii(index, a1, a2) {
+ var sp = stackSave();
+ try {
+  return getWasmTableEntry(index)(a1, a2);
  } catch (e) {
   stackRestore(sp);
   if (!(e instanceof EmscriptenEH)) throw e;
@@ -2262,10 +3005,32 @@ function invoke_iiiii(index, a1, a2, a3, a4) {
  }
 }
 
-function invoke_v(index) {
+function invoke_vii(index, a1, a2) {
  var sp = stackSave();
  try {
-  getWasmTableEntry(index)();
+  getWasmTableEntry(index)(a1, a2);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
+function invoke_iiiiiiiiii(index, a1, a2, a3, a4, a5, a6, a7, a8, a9) {
+ var sp = stackSave();
+ try {
+  return getWasmTableEntry(index)(a1, a2, a3, a4, a5, a6, a7, a8, a9);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
+function invoke_iiiiii(index, a1, a2, a3, a4, a5) {
+ var sp = stackSave();
+ try {
+  return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
  } catch (e) {
   stackRestore(sp);
   if (!(e instanceof EmscriptenEH)) throw e;
@@ -2284,13 +3049,24 @@ function invoke_viiii(index, a1, a2, a3, a4) {
  }
 }
 
+function invoke_v(index) {
+ var sp = stackSave();
+ try {
+  getWasmTableEntry(index)();
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
 Module["stringToUTF8"] = stringToUTF8;
 
-var missingLibrarySymbols = [ "zeroMemory", "stringToNewUTF8", "exitJS", "setErrNo", "inetPton4", "inetNtop4", "inetPton6", "inetNtop6", "readSockaddr", "writeSockaddr", "getHostByName", "getRandomDevice", "traverseStack", "convertPCtoSourceLocation", "readEmAsmArgs", "jstoi_q", "jstoi_s", "listenOnce", "autoResumeAudioContext", "dynCallLegacy", "getDynCaller", "dynCall", "handleException", "runtimeKeepalivePush", "runtimeKeepalivePop", "callUserCallback", "maybeExit", "safeSetTimeout", "asmjsMangle", "asyncLoad", "alignMemory", "mmapAlloc", "HandleAllocator", "getNativeTypeSize", "STACK_SIZE", "STACK_ALIGN", "POINTER_SIZE", "ASSERTIONS", "writeI53ToI64", "writeI53ToI64Clamped", "writeI53ToI64Signaling", "writeI53ToU64Clamped", "writeI53ToU64Signaling", "readI53FromU64", "convertI32PairToI53", "convertU32PairToI53", "getCFunc", "ccall", "cwrap", "uleb128Encode", "sigToWasmTypes", "generateFuncType", "convertJsFunctionToWasm", "getEmptyTableSlot", "updateTableMap", "getFunctionAddress", "addFunction", "removeFunction", "reallyNegative", "strLen", "reSign", "formatString", "intArrayToString", "AsciiToString", "stringToAscii", "UTF16ToString", "stringToUTF16", "lengthBytesUTF16", "UTF32ToString", "stringToUTF32", "lengthBytesUTF32", "allocateUTF8OnStack", "writeStringToMemory", "getSocketFromFD", "getSocketAddress", "registerKeyEventCallback", "maybeCStringToJsString", "findEventTarget", "findCanvasEventTarget", "getBoundingClientRect", "fillMouseEventData", "registerMouseEventCallback", "registerWheelEventCallback", "registerUiEventCallback", "registerFocusEventCallback", "fillDeviceOrientationEventData", "registerDeviceOrientationEventCallback", "fillDeviceMotionEventData", "registerDeviceMotionEventCallback", "screenOrientation", "fillOrientationChangeEventData", "registerOrientationChangeEventCallback", "fillFullscreenChangeEventData", "registerFullscreenChangeEventCallback", "JSEvents_requestFullscreen", "JSEvents_resizeCanvasForFullscreen", "registerRestoreOldStyle", "hideEverythingExceptGivenElement", "restoreHiddenElements", "setLetterbox", "softFullscreenResizeWebGLRenderTarget", "doRequestFullscreen", "fillPointerlockChangeEventData", "registerPointerlockChangeEventCallback", "registerPointerlockErrorEventCallback", "requestPointerLock", "fillVisibilityChangeEventData", "registerVisibilityChangeEventCallback", "registerTouchEventCallback", "fillGamepadEventData", "registerGamepadEventCallback", "registerBeforeUnloadEventCallback", "fillBatteryEventData", "battery", "registerBatteryEventCallback", "setCanvasElementSize", "getCanvasElementSize", "checkWasiClock", "createDyncallWrapper", "setImmediateWrapped", "clearImmediateWrapped", "polyfillSetImmediate", "getPromise", "makePromise", "makePromiseCallback", "setMainLoop" ];
+var missingLibrarySymbols = [ "zeroMemory", "stringToNewUTF8", "setErrNo", "inetPton4", "inetNtop4", "inetPton6", "inetNtop6", "readSockaddr", "writeSockaddr", "getHostByName", "getRandomDevice", "traverseStack", "convertPCtoSourceLocation", "readEmAsmArgs", "jstoi_q", "jstoi_s", "listenOnce", "autoResumeAudioContext", "dynCallLegacy", "getDynCaller", "dynCall", "handleException", "runtimeKeepalivePush", "runtimeKeepalivePop", "callUserCallback", "maybeExit", "safeSetTimeout", "asmjsMangle", "asyncLoad", "alignMemory", "mmapAlloc", "HandleAllocator", "getNativeTypeSize", "STACK_SIZE", "STACK_ALIGN", "POINTER_SIZE", "ASSERTIONS", "writeI53ToI64", "writeI53ToI64Clamped", "writeI53ToI64Signaling", "writeI53ToU64Clamped", "writeI53ToU64Signaling", "readI53FromU64", "convertI32PairToI53", "convertU32PairToI53", "getCFunc", "ccall", "cwrap", "uleb128Encode", "sigToWasmTypes", "generateFuncType", "convertJsFunctionToWasm", "getEmptyTableSlot", "updateTableMap", "getFunctionAddress", "addFunction", "removeFunction", "reallyNegative", "strLen", "reSign", "formatString", "intArrayToString", "AsciiToString", "stringToAscii", "allocateUTF8OnStack", "writeStringToMemory", "getSocketFromFD", "getSocketAddress", "registerKeyEventCallback", "maybeCStringToJsString", "findEventTarget", "findCanvasEventTarget", "getBoundingClientRect", "fillMouseEventData", "registerMouseEventCallback", "registerWheelEventCallback", "registerUiEventCallback", "registerFocusEventCallback", "fillDeviceOrientationEventData", "registerDeviceOrientationEventCallback", "fillDeviceMotionEventData", "registerDeviceMotionEventCallback", "screenOrientation", "fillOrientationChangeEventData", "registerOrientationChangeEventCallback", "fillFullscreenChangeEventData", "registerFullscreenChangeEventCallback", "JSEvents_requestFullscreen", "JSEvents_resizeCanvasForFullscreen", "registerRestoreOldStyle", "hideEverythingExceptGivenElement", "restoreHiddenElements", "setLetterbox", "softFullscreenResizeWebGLRenderTarget", "doRequestFullscreen", "fillPointerlockChangeEventData", "registerPointerlockChangeEventCallback", "registerPointerlockErrorEventCallback", "requestPointerLock", "fillVisibilityChangeEventData", "registerVisibilityChangeEventCallback", "registerTouchEventCallback", "fillGamepadEventData", "registerGamepadEventCallback", "registerBeforeUnloadEventCallback", "fillBatteryEventData", "battery", "registerBatteryEventCallback", "setCanvasElementSize", "getCanvasElementSize", "checkWasiClock", "createDyncallWrapper", "setImmediateWrapped", "clearImmediateWrapped", "polyfillSetImmediate", "getPromise", "makePromise", "makePromiseCallback", "setMainLoop", "init_embind", "throwUnboundTypeError", "ensureOverloadTable", "exposePublicSymbol", "replacePublicSymbol", "getBasestPointer", "registerInheritedInstance", "unregisterInheritedInstance", "getInheritedInstance", "getInheritedInstanceCount", "getLiveInheritedInstances", "getTypeName", "heap32VectorToArray", "requireRegisteredType", "enumReadValueFromPointer", "runDestructors", "new_", "craftInvokerFunction", "embind__requireFunction", "genericPointerToWireType", "constNoSmartPtrRawPointerToWireType", "nonConstNoSmartPtrRawPointerToWireType", "init_RegisteredPointer", "RegisteredPointer", "RegisteredPointer_getPointee", "RegisteredPointer_destructor", "RegisteredPointer_deleteObject", "RegisteredPointer_fromWireType", "runDestructor", "releaseClassHandle", "detachFinalizer", "attachFinalizer", "makeClassHandle", "init_ClassHandle", "ClassHandle", "ClassHandle_isAliasOf", "throwInstanceAlreadyDeleted", "ClassHandle_clone", "ClassHandle_delete", "ClassHandle_isDeleted", "ClassHandle_deleteLater", "flushPendingDeletes", "setDelayFunction", "RegisteredClass", "shallowCopyInternalPointer", "downcastPointer", "upcastPointer", "validateThis", "getStringOrSymbol", "craftEmvalAllocator", "emval_get_global", "emval_lookupTypes", "emval_allocateDestructors", "emval_addMethodCaller" ];
 
 missingLibrarySymbols.forEach(missingLibrarySymbol);
 
-var unexportedSymbols = [ "run", "UTF8ArrayToString", "UTF8ToString", "stringToUTF8Array", "lengthBytesUTF8", "addOnPreRun", "addOnInit", "addOnPreMain", "addOnExit", "addOnPostRun", "addRunDependency", "removeRunDependency", "FS_createFolder", "FS_createPath", "FS_createDataFile", "FS_createPreloadedFile", "FS_createLazyFile", "FS_createLink", "FS_createDevice", "FS_unlink", "out", "err", "callMain", "abort", "keepRuntimeAlive", "wasmMemory", "stackAlloc", "stackSave", "stackRestore", "getTempRet0", "setTempRet0", "writeStackCookie", "checkStackCookie", "ptrToString", "getHeapMax", "emscripten_realloc_buffer", "ENV", "ERRNO_CODES", "ERRNO_MESSAGES", "DNS", "Protocols", "Sockets", "timers", "warnOnce", "UNWIND_CACHE", "readEmAsmArgsArray", "getExecutableName", "readI53FromI64", "convertI32PairToI53Checked", "freeTableIndexes", "functionsInTableMap", "unSign", "setValue", "getValue", "PATH", "PATH_FS", "intArrayFromString", "UTF16Decoder", "allocateUTF8", "writeArrayToMemory", "writeAsciiToMemory", "SYSCALLS", "JSEvents", "specialHTMLTargets", "currentFullscreenStrategy", "restoreOldWindowedStyle", "demangle", "demangleAll", "jsStackTrace", "stackTrace", "ExitStatus", "getEnvStrings", "flush_NO_FILESYSTEM", "promiseMap", "uncaughtExceptionCount", "exceptionLast", "exceptionCaught", "ExceptionInfo", "exception_addRef", "exception_decRef", "getExceptionMessageCommon", "incrementExceptionRefcount", "decrementExceptionRefcount", "getExceptionMessage", "Browser", "wget" ];
+var unexportedSymbols = [ "run", "UTF8ArrayToString", "UTF8ToString", "stringToUTF8Array", "lengthBytesUTF8", "addOnPreRun", "addOnInit", "addOnPreMain", "addOnExit", "addOnPostRun", "addRunDependency", "removeRunDependency", "FS_createFolder", "FS_createPath", "FS_createDataFile", "FS_createPreloadedFile", "FS_createLazyFile", "FS_createLink", "FS_createDevice", "FS_unlink", "out", "err", "callMain", "abort", "keepRuntimeAlive", "wasmMemory", "stackAlloc", "stackSave", "stackRestore", "getTempRet0", "setTempRet0", "writeStackCookie", "checkStackCookie", "ptrToString", "exitJS", "getHeapMax", "emscripten_realloc_buffer", "ENV", "ERRNO_CODES", "ERRNO_MESSAGES", "DNS", "Protocols", "Sockets", "timers", "warnOnce", "UNWIND_CACHE", "readEmAsmArgsArray", "getExecutableName", "readI53FromI64", "convertI32PairToI53Checked", "freeTableIndexes", "functionsInTableMap", "unSign", "setValue", "getValue", "PATH", "PATH_FS", "intArrayFromString", "UTF16Decoder", "UTF16ToString", "stringToUTF16", "lengthBytesUTF16", "UTF32ToString", "stringToUTF32", "lengthBytesUTF32", "allocateUTF8", "writeArrayToMemory", "writeAsciiToMemory", "SYSCALLS", "JSEvents", "specialHTMLTargets", "currentFullscreenStrategy", "restoreOldWindowedStyle", "demangle", "demangleAll", "jsStackTrace", "stackTrace", "ExitStatus", "getEnvStrings", "flush_NO_FILESYSTEM", "promiseMap", "uncaughtExceptionCount", "exceptionLast", "exceptionCaught", "ExceptionInfo", "exception_addRef", "exception_decRef", "getExceptionMessageCommon", "incrementExceptionRefcount", "decrementExceptionRefcount", "getExceptionMessage", "Browser", "wget", "InternalError", "BindingError", "UnboundTypeError", "PureVirtualError", "throwInternalError", "throwBindingError", "extendError", "createNamedFunction", "embindRepr", "registeredInstances", "registeredTypes", "awaitingDependencies", "typeDependencies", "registeredPointers", "registerType", "whenDependentTypesAreResolved", "embind_charCodes", "embind_init_charCodes", "readLatin1String", "getShiftFromSize", "integerReadValueFromPointer", "floatReadValueFromPointer", "simpleReadValueFromPointer", "tupleRegistrations", "structRegistrations", "finalizationRegistry", "detachFinalizer_deps", "deletionQueue", "delayFunction", "char_0", "char_9", "makeLegalFunctionName", "emval_handle_array", "emval_free_list", "emval_symbols", "init_emval", "count_emval_handles", "get_first_emval", "Emval", "emval_newers", "emval_methodCallers", "emval_registeredMethods" ];
 
 unexportedSymbols.forEach(unexportedRuntimeSymbol);
 

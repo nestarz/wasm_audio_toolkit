@@ -4,6 +4,7 @@
 #include <vector>
 #include <functional>
 #include <emscripten.h>
+#include <emscripten/bind.h>
 
 extern "C"
 {
@@ -26,10 +27,75 @@ int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
   return buffer_size;
 }
 
+<<<<<<< Updated upstream
 extern "C"
 {
   EMSCRIPTEN_KEEPALIVE
   int encode_mux(uint8_t *array, const int size, const int sample_rate, const int num_channels, const int profile_id)
+=======
+struct buffer_data
+{
+  uint8_t *ptr;
+  size_t size;
+};
+
+static int custom_io_read(void *opaque, uint8_t *buf, int buf_size)
+{
+  struct buffer_data *bd = (struct buffer_data *)opaque;
+  buf_size = FFMIN(buf_size, bd->size);
+  if (!buf_size)
+    return AVERROR_EOF;
+  memcpy(buf, bd->ptr, buf_size);
+  bd->ptr += buf_size;
+  bd->size -= buf_size;
+  return buf_size;
+}
+
+int find_nearest(const int *raw_arr, const int target)
+{
+  int nearest = *std::min_element(raw_arr, std::find(raw_arr, raw_arr + 100, 0),
+                                  [&](int a, int b)
+                                  { return std::abs(a - target) < std::abs(b - target); });
+  printf("target: %d, nearest: %d\n", target, nearest);
+  return nearest;
+}
+
+struct Result
+{
+  uint16_t size;
+  uint16_t sample_rate;
+  uint16_t bit_depth;
+  uint16_t num_channels;
+  uint16_t duration;
+  uint16_t frame_size;
+};
+
+extern "C"
+{
+  EMSCRIPTEN_KEEPALIVE
+  Result *probe(uint8_t *array, const size_t size, const char *src_format_short_name)
+  {
+    struct buffer_data bd = {array, size};
+    std::vector<uint8_t> input_buffer(1);
+    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, nullptr);
+    AVFormatContext *input_ctx = avformat_alloc_context();
+    input_ctx->pb = avio_ctx;
+    const AVInputFormat *input_format = throw_if_null(av_find_input_format(src_format_short_name), "Could not find input format");
+    throw_if_neg(avformat_open_input(&input_ctx, nullptr, input_format, nullptr), "Could not open input format context");
+    throw_if_neg(avformat_find_stream_info(input_ctx, nullptr), "Could not find stream information");
+    AVCodecParameters *codecParams = input_ctx->streams[0]->codecpar;
+    struct Result *r = static_cast<Result *>(malloc(sizeof(struct Result)));
+    r->size = size;
+    r->num_channels = codecParams->ch_layout.nb_channels;
+    r->bit_depth = codecParams->bits_per_raw_sample > 0 ? codecParams->bits_per_raw_sample : 16;
+    r->frame_size = codecParams->frame_size;
+    r->sample_rate = codecParams->sample_rate;
+    r->duration = input_ctx->streams[0]->duration;
+    return r;
+  };
+  EMSCRIPTEN_KEEPALIVE
+  Result *transcode(uint8_t *array, const size_t size, const char *src_format_short_name, const char *dst_format_short_name, const char *dst_codec_name)
+>>>>>>> Stashed changes
   {
     //
     const int pcm_data_size = size;
@@ -68,6 +134,51 @@ extern "C"
     throw_if_neg(avcodec_open2(codec_ctx, codec, nullptr), "Failed to open codec");
     throw_if_neg(avcodec_parameters_from_context(stream->codecpar, codec_ctx), "Failed to copy codec parameters");
 
+<<<<<<< Updated upstream
+=======
+    // Create input AVIOContext
+    struct buffer_data bd = {array, size};
+    std::vector<uint8_t> input_buffer(1);
+    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, nullptr);
+
+    // Initialize input format context
+    AVFormatContext *input_ctx = avformat_alloc_context();
+    input_ctx->pb = avio_ctx;
+
+    const AVInputFormat *input_format = throw_if_null(av_find_input_format(src_format_short_name), "Could not find input format");
+    throw_if_neg(avformat_open_input(&input_ctx, nullptr, input_format, nullptr), "Could not open input format context");
+    throw_if_neg(avformat_find_stream_info(input_ctx, nullptr), "Could not find stream information");
+    printf("duration %d\n", input_ctx->duration);
+    throw_if_neg(input_ctx->pb->error, "Error in PB IO");
+
+    // Initialize output format context
+    AVFormatContext *output_ctx = nullptr;
+    const AVOutputFormat *output_format = throw_if_null(av_guess_format(dst_format_short_name, nullptr, nullptr), "Output format not recognized");
+    throw_if_neg(avformat_alloc_output_context2(&output_ctx, output_format, nullptr, nullptr), "Failed to allocate output context");
+
+    // Copy streams and setup codecs
+    AVStream *in_stream = input_ctx->streams[0];
+    const AVCodec *dec_codec = throw_if_null(avcodec_find_decoder(in_stream->codecpar->codec_id), "Source codec not found/supported");
+    AVCodecContext *dec_ctx = throw_if_null(avcodec_alloc_context3(dec_codec), "Failed to allocate source codec context");
+    throw_if_neg(avcodec_parameters_to_context(dec_ctx, in_stream->codecpar), "Failed to copy source codec parameters to source codec context");
+    throw_if_neg(avcodec_open2(dec_ctx, dec_codec, nullptr), "Failed to open source codec");
+
+    AVStream *out_stream = throw_if_null(avformat_new_stream(output_ctx, nullptr), "Failed to create a new stream");
+    const AVCodec *enc_codec = throw_if_null(avcodec_find_encoder_by_name(dst_codec_name), "Destination codec not found");
+    AVCodecContext *enc_ctx = throw_if_null(avcodec_alloc_context3(enc_codec), "Failed to allocate destination codec context");
+    if (dec_ctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+      av_channel_layout_default(&dec_ctx->ch_layout, dec_ctx->ch_layout.nb_channels);
+    throw_if_neg(av_channel_layout_copy(&enc_ctx->ch_layout, &dec_ctx->ch_layout), "Could not select channel layout");
+    enc_ctx->sample_rate = find_nearest(enc_codec->supported_samplerates, dec_ctx->sample_rate);
+    enc_ctx->sample_fmt = enc_codec->sample_fmts[0];
+    enc_ctx->time_base = (AVRational){1, enc_ctx->sample_rate};
+    enc_ctx->bit_rate = dec_ctx->bit_rate;
+    enc_ctx->strict_std_compliance = -2;
+    throw_if_neg(avcodec_open2(enc_ctx, enc_codec, nullptr), "Failed to open destination codec");
+    throw_if_neg(avcodec_parameters_from_context(out_stream->codecpar, enc_ctx), "Failed to copy destination codec parameters");
+
+    // Create a custom IO context for writing the output
+>>>>>>> Stashed changes
     std::vector<uint8_t> output_buffer(1);
     AVIOContext *avio_ctx = avio_alloc_context(output_buffer.data(), output_buffer.size(), 1, nullptr, nullptr, &custom_io_write, nullptr);
     format_ctx->pb = avio_ctx;
@@ -113,6 +224,7 @@ extern "C"
         const int ret = avcodec_receive_packet(codec_ctx, pkt);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
           break;
+<<<<<<< Updated upstream
         throw_if_neg(ret, "Failed to receive packet.");
         av_packet_rescale_ts(pkt, codec_ctx->time_base, stream->time_base);
         pkt->stream_index = stream->index;
@@ -125,15 +237,89 @@ extern "C"
 
     throw_if_neg(av_write_trailer(format_ctx), "Failed to write trailer");
 
+=======
+        throw_if_neg(ret, "Failed to receive frame from decoder");
+        AVFrame *out_frame = av_frame_alloc();
+        out_frame->nb_samples = enc_ctx->frame_size;
+        out_frame->format = enc_ctx->sample_fmt;
+        throw_if_neg(av_channel_layout_copy(&out_frame->ch_layout, &enc_ctx->ch_layout), "Could not select channel layout");
+        throw_if_neg(av_frame_get_buffer(out_frame, 0), "Failed to allocate output frame buffer");
+        printf("enc_ctx->frame_size: %d, frame->nb_samples: %d\n", enc_ctx->frame_size, frame->nb_samples);
+        throw_if_neg(swr_convert(swr_ctx, out_frame->data, enc_ctx->frame_size, (const uint8_t **)frame->data, frame->nb_samples), "Failed to resample frame");
+
+        // sends an uncompressed frame from the encoder to the muxer (muxer2) for encoding
+        // enc_ctx <-- out_frame
+        pkt->data = nullptr;
+        pkt->size = 0;
+        throw_if_neg(avcodec_send_frame(enc_ctx, out_frame), "Failed to send frame to encoder");
+        while (true)
+        {
+          const int ret = avcodec_receive_packet(enc_ctx, pkt);
+          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            break;
+          throw_if_neg(ret, "Failed to receive packet.");
+          av_packet_rescale_ts(pkt, enc_ctx->time_base, out_stream->time_base);
+          pkt->stream_index = out_stream->index;
+          throw_if_neg(av_interleaved_write_frame(output_ctx, pkt), "Failed to write frame");
+          av_packet_unref(pkt);
+        }
+        av_frame_unref(frame);
+        av_frame_unref(out_frame);
+      }
+      av_packet_unref(pkt);
+    }
+
+    av_dump_format(input_ctx, 0, "<input>", 0);
+    av_dump_format(output_ctx, 0, "<output>", 1);
+
+    // Flush encoder
+    // AVPacket *pkt = throw_if_null(av_packet_alloc(), "av_packet_alloc failed");
+    // throw_if_neg(avcodec_send_frame(enc_ctx, nullptr), "Failed to send empty frame to encoder");
+    // while (avcodec_receive_packet(enc_ctx, pkt) == 0)
+    // {
+    //   throw_if_neg(av_write_frame(output_ctx, pkt), "Failed to write packet");
+    //   av_packet_unref(pkt);
+    // }
+
+    // Write trailer and cleanup
+    throw_if_neg(av_write_trailer(output_ctx), "Failed to write trailer");
+
+    // Copy the transcoded audio data back to the input array
+    output_buffer.resize(output_avio_ctx->pos);
+
+    std::memcpy(array, result.data(), result.size());
+
+    struct Result *r = static_cast<Result *>(malloc(sizeof(struct Result)));
+    printf("sizeof(struct Result) %zu\n", sizeof(struct Result));
+    printf("transcoded ended, size: %zu\n", result.size());
+    r->size = result.size();
+    r->sample_rate = enc_ctx->sample_rate;
+
+    // Cleanup
+>>>>>>> Stashed changes
     swr_free(&swr_ctx);
     av_frame_free(&frame);
     avcodec_free_context(&codec_ctx);
     avformat_free_context(format_ctx);
 
+<<<<<<< Updated upstream
     output_buffer.resize(avio_ctx->pos);
     av_free(avio_ctx);
 
     std::memcpy(array, result.data(), result.size());
     return result.size();
+=======
+    avcodec_close(dec_ctx);
+    avcodec_free_context(&dec_ctx);
+    avcodec_close(enc_ctx);
+    avcodec_free_context(&enc_ctx);
+
+    // avformat_close_input(&input_ctx);
+    // avformat_free_context(input_ctx);
+
+    avformat_close_input(&output_ctx);
+    avformat_free_context(output_ctx);
+    return r;
+>>>>>>> Stashed changes
   }
 }

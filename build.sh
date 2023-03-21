@@ -127,7 +127,12 @@ ask_remove_folder $FFMPEG_BUILD
   emmake make install
 )
 
+<<<<<<< Updated upstream
 em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
+=======
+em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a $LAME_BUILD/lib/*.a \
+  --bind \
+>>>>>>> Stashed changes
   -I $FFMPEG_BUILD/include \
   -o ./dist/main.js \
   -s STRICT=1 \
@@ -139,7 +144,11 @@ em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
   -s IMPORTED_MEMORY \
   -s MALLOC=emmalloc \
   -s USE_ES6_IMPORT_META=1 \
+<<<<<<< Updated upstream
   -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_encode_mux']" \
+=======
+  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_transcode', '_probe']" \
+>>>>>>> Stashed changes
   -s EXPORTED_RUNTIME_METHODS=stringToUTF8 \
   -g4 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=1 -s DEMANGLE_SUPPORT=1 \
   -s NO_DISABLE_EXCEPTION_CATCHING
