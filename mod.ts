@@ -121,7 +121,7 @@ if (import.meta.main) {
     Deno.writeFile("./dist/out.aac", data)
   );
   await transcode(data, "wav", "mp4", "libfdk_aac", {
-    movflags: "+frag_keyframe+empty_moov",
+    movflags: "+dash+delay_moov+skip_sidx+skip_trailer",
   }).then(({ data }) => Deno.writeFile("./dist/out.mp4", data));
   // await transcode(data, "wav", "ogg", "libopus").then(({ data }) =>
   //   Deno.writeFile("./dist/out.ogg", data)
