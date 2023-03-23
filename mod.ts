@@ -9,6 +9,7 @@ const createMalloc = (handler) => {
   const cleanSet = [];
   return [
     (arrOrString) => {
+      if (!arrOrString) return [null, 0];
       const inputArray =
         typeof arrOrString === "string"
           ? new TextEncoder().encode(arrOrString + "\0")
@@ -28,17 +29,18 @@ export const probe = async (avArray: Uint8Array, sourceContainer: string) => {
   const [malloc, free] = createMalloc(handler);
   const [avArrayPtr, size] = malloc(avArray);
   const [sourceContainerPtr] = malloc(sourceContainer);
-  const structPtr = handler._probe(avArrayPtr, size * 2, sourceContainerPtr);
-  const view = new DataView(handler.HEAPU8.buffer, structPtr, 12);
+  console.log(size);
+  const structPtr = handler._probe(avArrayPtr, size, sourceContainerPtr);
+  const view = new DataView(handler.HEAPU8.buffer, structPtr, 18);
   const res = {
-    size: view.getUint16(0, true),
-    sampleRate: view.getUint16(2, true),
-    bitDepth: view.getUint16(4, true),
-    numChannels: view.getUint16(6, true),
-    duration: view.getUint16(8, true),
-    frameSize: view.getUint16(10, true),
+    outPtr: view.getUint32(0, true),
+    size: view.getUint32(4, true),
+    sampleRate: view.getUint16(8, true),
+    bitDepth: view.getUint16(10, true),
+    numChannels: view.getUint16(12, true),
+    duration: view.getUint16(14, true),
+    frameSize: view.getUint16(16, true),
   };
-  console.log(res);
   free();
   return res;
 };
@@ -48,33 +50,49 @@ export const transcode = async (
   sourceContainer: string,
   destContainer: string,
   destCodec: string,
+  destContainerOptions?: Record<string, string>,
   initialMemory: number = 128 * 1024 * 1024
 ) => {
+  const destContainerOptionsString = destContainerOptions
+    ? Object.entries(destContainerOptions)
+        .map((v) => v.join(":"))
+        .join(",")
+    : null;
   const handler = await ModuleFactory({ INITIAL_MEMORY: initialMemory });
   const [malloc, free] = createMalloc(handler);
   const [avArrayPtr, size] = malloc(avArray);
   const [sourceContainerPtr] = malloc(sourceContainer);
   const [destContainerPtr] = malloc(destContainer);
   const [destCodecPtr] = malloc(destCodec);
-
+  const [destContainerOptionsPtr] = malloc(destContainerOptionsString);
   const structPtr = handler._transcode(
     avArrayPtr,
-    size * 2,
+    size,
     sourceContainerPtr,
     destContainerPtr,
-    destCodecPtr
+    destCodecPtr,
+    destContainerOptionsPtr
   );
-  const view = new DataView(handler.HEAPU8.buffer, structPtr, 4);
+  const view = new DataView(handler.HEAPU8.buffer, structPtr, 10);
   const res = {
-    size: view.getUint16(0, true),
-    sample_rate: view.getUint16(2, true),
+    outPtr: view.getUint32(0, true),
+    size: view.getUint32(4, true),
+    sample_rate: view.getUint16(8, true),
   };
   const data = new Uint8Array(
-    new Uint8Array(handler.HEAPU8.buffer, avArrayPtr, res.size)
+    new Uint8Array(handler.HEAPU8.buffer, res.outPtr, res.size)
   );
+  console.log(data);
   free();
   return { data, ...res };
 };
+
+// const data = await fetch(new URL("dist/out.mp4", import.meta.url))
+//   .then((r) => r.arrayBuffer())
+//   .then((buffer) => new Uint8Array(buffer))
+//   .then(async (data) => {
+//     const { sampleRate, numChannels } = await probe(data, "mov");
+//   });
 
 if (import.meta.main) {
   const data = await fetch(
@@ -84,24 +102,27 @@ if (import.meta.main) {
     )
   )
     .then((r) => r.arrayBuffer())
-    .then((v) =>
-      addWaveHeader(new Uint8Array(v).slice(0, 2 * 1024 * 1024), 2, 48_000, 16)
-    );
-  // .then(async (arr) => {
-  //   const decoder = await createDecoder(arr, wasmPath);
-  //   const { pcm, samplingRate, numChannels } = decoder.decode(
-  //     decoder.duration
-  //   );
-  //   return addWaveHeader(
-  //     new Uint8Array(pcm.buffer),
-  //     numChannels,
-  //     samplingRate,
-  //     16
-  //   );
-  // });
+    .then((buffer) => new Uint8Array(buffer))
+    .then(async (data) => {
+      const { sampleRate, numChannels } = await probe(data, "wav");
+      console.log(sampleRate, numChannels);
+      const chunkSize = 1920000;
+      const start = chunkSize * 30;
+      return new Uint8Array(
+        addWaveHeader(
+          new Int16Array(data.slice(start, start + chunkSize).buffer),
+          numChannels,
+          sampleRate,
+          16
+        ).buffer
+      );
+    });
   await transcode(data, "wav", "adts", "libfdk_aac").then(({ data }) =>
     Deno.writeFile("./dist/out.aac", data)
   );
+  await transcode(data, "wav", "mp4", "libfdk_aac", {
+   // movflags: "+faststart+frag_keyframe+empty_moov",
+  }).then(({ data }) => Deno.writeFile("./dist/out.mp4", data));
   // await transcode(data, "wav", "ogg", "libopus").then(({ data }) =>
   //   Deno.writeFile("./dist/out.ogg", data)
   // );

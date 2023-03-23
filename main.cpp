@@ -27,22 +27,51 @@ int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
   return buffer_size;
 }
 
-struct buffer_data
+struct BufferData
 {
-  uint8_t *ptr;
-  size_t size;
+  const uint8_t *ptr;
+  const size_t size;
+  size_t offset;
 };
 
 static int custom_io_read(void *opaque, uint8_t *buf, int buf_size)
 {
-  struct buffer_data *bd = (struct buffer_data *)opaque;
-  buf_size = FFMIN(buf_size, bd->size);
+  struct BufferData *bd = (struct BufferData *)opaque;
+  buf_size = FFMIN(buf_size, bd->size - bd->offset);
   if (!buf_size)
     return AVERROR_EOF;
-  memcpy(buf, bd->ptr, buf_size);
-  bd->ptr += buf_size;
-  bd->size -= buf_size;
+  memcpy(buf, bd->ptr + bd->offset, buf_size);
+  bd->offset += buf_size;
   return buf_size;
+}
+
+static int64_t custom_seek(void *opaque, int64_t offset, int whence)
+{
+  struct BufferData *bd = (struct BufferData *)opaque;
+  if (whence == AVSEEK_SIZE)
+    return bd->size;
+
+  int64_t new_position = -1;
+  switch (whence)
+  {
+  case SEEK_SET:
+    new_position = offset;
+    break;
+  case SEEK_CUR:
+    new_position = bd->offset + offset;
+    break;
+  case SEEK_END:
+    new_position = bd->size - offset;
+    break;
+  default:
+    return AVERROR(EINVAL);
+  }
+
+  if (new_position < 0 || new_position > bd->size)
+    return AVERROR(EINVAL);
+
+  bd->offset = new_position;
+  return new_position;
 }
 
 int find_nearest(const int *raw_arr, const int target)
@@ -56,7 +85,8 @@ int find_nearest(const int *raw_arr, const int target)
 
 struct Result
 {
-  uint16_t size;
+  uint8_t *out_ptr;
+  uint32_t size;
   uint16_t sample_rate;
   uint16_t bit_depth;
   uint16_t num_channels;
@@ -67,11 +97,11 @@ struct Result
 extern "C"
 {
   EMSCRIPTEN_KEEPALIVE
-  Result *probe(uint8_t *array, const size_t size, const char *src_format_short_name)
+  Result *probe(const uint8_t *array, const size_t size, const char *src_format_short_name)
   {
-    struct buffer_data bd = {array, size};
+    struct BufferData bd = {array, size, 0};
     std::vector<uint8_t> input_buffer(1);
-    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, nullptr);
+    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, &custom_seek);
     AVFormatContext *input_ctx = avformat_alloc_context();
     input_ctx->pb = avio_ctx;
     const AVInputFormat *input_format = throw_if_null(av_find_input_format(src_format_short_name), "Could not find input format");
@@ -88,15 +118,18 @@ extern "C"
     return r;
   };
   EMSCRIPTEN_KEEPALIVE
-  Result *transcode(uint8_t *array, const size_t size, const char *src_format_short_name, const char *dst_format_short_name, const char *dst_codec_name)
+  Result *transcode(const uint8_t *array, const size_t size, const char *src_format_short_name,
+                    const char *dst_format_short_name, const char *dst_codec_name,
+                    const char *dst_container_options)
   {
-    printf("dst_format_short_name: %s\n", dst_format_short_name);
+    printf("dst_format_short_name: %s %s\n", dst_format_short_name, dst_container_options);
     printf("dst_codec_name: %s\n", dst_codec_name);
 
     // Create input AVIOContext
-    struct buffer_data bd = {array, size};
+    struct BufferData bd = {array, size, 0};
+    printf("size: %zu\n", bd.size);
     std::vector<uint8_t> input_buffer(1);
-    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, nullptr);
+    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, &custom_seek);
 
     // Initialize input format context
     AVFormatContext *input_ctx = avformat_alloc_context();
@@ -129,19 +162,30 @@ extern "C"
     enc_ctx->sample_rate = find_nearest(enc_codec->supported_samplerates, dec_ctx->sample_rate);
     enc_ctx->sample_fmt = enc_codec->sample_fmts[0];
     enc_ctx->time_base = (AVRational){1, enc_ctx->sample_rate};
-    enc_ctx->bit_rate = dec_ctx->bit_rate;
     enc_ctx->strict_std_compliance = -2;
+    AVDictionary *codec_opts = NULL;
+    if (dst_container_options != NULL)
+      for (char *line = strtok(strdup(dst_container_options), ","); line != NULL;
+           line = strtok(line + strlen(line) + 1, ","))
+      {
+        char *key = strtok(strdup(line), ":");
+        char *value = strtok(key + strlen(key) + 1, ":");
+        printf("key: %s\tvalue: %s\n", key, value);
+        av_dict_set(&codec_opts, key, value, 0);
+      }
     throw_if_neg(avcodec_open2(enc_ctx, enc_codec, nullptr), "Failed to open destination codec");
+    printf("computed enc_ctx->bit_rate: %lld\n", enc_ctx->bit_rate);
+
     throw_if_neg(avcodec_parameters_from_context(out_stream->codecpar, enc_ctx), "Failed to copy destination codec parameters");
 
     // Create a custom IO context for writing the output
     std::vector<uint8_t> output_buffer(1);
-    AVIOContext *output_avio_ctx = avio_alloc_context(output_buffer.data(), output_buffer.size(), 1, nullptr, nullptr, &custom_io_write, nullptr);
+    AVIOContext *output_avio_ctx = avio_alloc_context(output_buffer.data(), output_buffer.size(), 1, nullptr, nullptr, &custom_io_write, &custom_seek);
     output_ctx->pb = output_avio_ctx;
-    output_ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
 
     // Write header
-    throw_if_neg(avformat_write_header(output_ctx, nullptr), "Failed to write header");
+    throw_if_neg(avformat_write_header(output_ctx, &codec_opts), "Failed to write header");
+    output_ctx->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_AUTO_BSF;
 
     // Prepare resampler
     SwrContext *swr_ctx = nullptr;
@@ -181,15 +225,16 @@ extern "C"
         // receives a decoded frame from the decoder, contains uncompressed audio
         // frame <-- dec_ctx
         ret = avcodec_receive_frame(dec_ctx, frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        if (ret < 0) // (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) // not working on the end of file
           break;
         throw_if_neg(ret, "Failed to receive frame from decoder");
         AVFrame *out_frame = av_frame_alloc();
         out_frame->nb_samples = enc_ctx->frame_size;
         out_frame->format = enc_ctx->sample_fmt;
+        out_frame->pts = av_rescale_q(frame->pts, in_stream->time_base, out_stream->time_base);
         throw_if_neg(av_channel_layout_copy(&out_frame->ch_layout, &enc_ctx->ch_layout), "Could not select channel layout");
         throw_if_neg(av_frame_get_buffer(out_frame, 0), "Failed to allocate output frame buffer");
-        printf("enc_ctx->frame_size: %d, frame->nb_samples: %d\n", enc_ctx->frame_size, frame->nb_samples);
+        // printf("enc_ctx->frame_size: %d, frame->nb_samples: %d\n", enc_ctx->frame_size, frame->nb_samples);
         throw_if_neg(swr_convert(swr_ctx, out_frame->data, enc_ctx->frame_size, (const uint8_t **)frame->data, frame->nb_samples), "Failed to resample frame");
 
         // sends an uncompressed frame from the encoder to the muxer (muxer2) for encoding
@@ -218,13 +263,12 @@ extern "C"
     av_dump_format(output_ctx, 0, "<output>", 1);
 
     // Flush encoder
-    // AVPacket *pkt = throw_if_null(av_packet_alloc(), "av_packet_alloc failed");
-    // throw_if_neg(avcodec_send_frame(enc_ctx, nullptr), "Failed to send empty frame to encoder");
-    // while (avcodec_receive_packet(enc_ctx, pkt) == 0)
-    // {
-    //   throw_if_neg(av_write_frame(output_ctx, pkt), "Failed to write packet");
-    //   av_packet_unref(pkt);
-    // }
+    throw_if_neg(avcodec_send_frame(enc_ctx, nullptr), "Failed to send empty frame to encoder");
+    while (avcodec_receive_packet(enc_ctx, pkt) == 0)
+    {
+      throw_if_neg(av_write_frame(output_ctx, pkt), "Failed to write packet");
+      av_packet_unref(pkt);
+    }
 
     // Write trailer and cleanup
     throw_if_neg(av_write_trailer(output_ctx), "Failed to write trailer");
@@ -232,11 +276,10 @@ extern "C"
     // Copy the transcoded audio data back to the input array
     output_buffer.resize(output_avio_ctx->pos);
 
-    std::memcpy(array, result.data(), result.size());
-
     struct Result *r = static_cast<Result *>(malloc(sizeof(struct Result)));
     printf("sizeof(struct Result) %zu\n", sizeof(struct Result));
     printf("transcoded ended, size: %zu\n", result.size());
+    r->out_ptr = result.data();
     r->size = result.size();
     r->sample_rate = enc_ctx->sample_rate;
 
@@ -255,6 +298,8 @@ extern "C"
 
     avformat_close_input(&output_ctx);
     avformat_free_context(output_ctx);
+    printf("transcoded ended, size: %zu\n", r->size);
+    printf("transcoded ended, size: %zu\n", result.size());
     return r;
   }
 }

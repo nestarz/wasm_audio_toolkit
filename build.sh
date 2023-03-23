@@ -146,8 +146,8 @@ ask_remove_folder $FFMPEG_BUILD
     --enable-libmp3lame \
     --enable-encoder=libopus,libfdk_aac,mp2,pcm_s16le,libmp3lame \
     --enable-decoder=libopus,libfdk_aac,mp2,pcm_s16le,mp3 \
-    --enable-muxer=wav,webm,ogg,adts,mp2,mp3 \
-    --enable-demuxer=wav,webm,ogg,aac,mp2,mp3
+    --enable-muxer=wav,webm,ogg,adts,mp2,mp3,mp4 \
+    --enable-demuxer=wav,webm,ogg,aac,mp2,mp3,mov
   # \
   #
   emmake make -j8
