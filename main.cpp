@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
-#include <vector>
 #include <functional>
 #include <emscripten.h>
 #include <emscripten/bind.h>
@@ -20,23 +19,38 @@ T throw_if_null(T result, const std::string &error_msg) { return result ? result
 template <typename T>
 T throw_if_neg(T result, const std::string &error_msg) { return result < 0 ? throw std::runtime_error("(" + std::to_string(result) + ": " + std::string(av_err2str(result)) + ") " + error_msg) : result; }
 
-std::vector<uint8_t> result;
-int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
+struct WriteBufferData
 {
-  result.insert(result.end(), buffer, buffer + buffer_size);
-  return buffer_size;
-}
-
-struct BufferData
+  uint8_t *ptr;
+  size_t size;
+  size_t offset;
+};
+struct ReadBufferData
 {
   const uint8_t *ptr;
   const size_t size;
   size_t offset;
 };
 
+int custom_io_write(void *opaque, uint8_t *buffer, int32_t buffer_size)
+{
+  struct WriteBufferData *bd = (struct WriteBufferData *)opaque;
+  size_t new_size = bd->offset + buffer_size;
+  if (new_size > bd->size)
+  {
+    bd->ptr = (uint8_t *)av_realloc(bd->ptr, new_size);
+    if (!bd->ptr)
+      return AVERROR(ENOMEM);
+    bd->size = new_size;
+  }
+  memcpy(bd->ptr + bd->offset, buffer, buffer_size);
+  bd->offset += buffer_size;
+  return buffer_size;
+}
+
 static int custom_io_read(void *opaque, uint8_t *buf, int buf_size)
 {
-  struct BufferData *bd = (struct BufferData *)opaque;
+  struct ReadBufferData *bd = (struct ReadBufferData *)opaque;
   buf_size = FFMIN(buf_size, bd->size - bd->offset);
   if (!buf_size)
     return AVERROR_EOF;
@@ -47,7 +61,7 @@ static int custom_io_read(void *opaque, uint8_t *buf, int buf_size)
 
 static int64_t custom_seek(void *opaque, int64_t offset, int whence)
 {
-  struct BufferData *bd = (struct BufferData *)opaque;
+  struct ReadBufferData *bd = (struct ReadBufferData *)opaque;
   if (whence == AVSEEK_SIZE)
     return bd->size;
 
@@ -99,9 +113,10 @@ extern "C"
   EMSCRIPTEN_KEEPALIVE
   Result *probe(const uint8_t *array, const size_t size, const char *src_format_short_name)
   {
-    struct BufferData bd = {array, size, 0};
-    std::vector<uint8_t> input_buffer(1);
-    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, &custom_seek);
+    struct ReadBufferData in_bd = {array, size, 0};
+    size_t in_ctx_buf_size = 1;
+    uint8_t *in_ctx_buf = (uint8_t *)malloc(in_ctx_buf_size);
+    auto avio_ctx = avio_alloc_context(in_ctx_buf, in_ctx_buf_size, 0, &in_bd, &custom_io_read, nullptr, &custom_seek);
     AVFormatContext *input_ctx = avformat_alloc_context();
     input_ctx->pb = avio_ctx;
     const AVInputFormat *input_format = throw_if_null(av_find_input_format(src_format_short_name), "Could not find input format");
@@ -126,10 +141,10 @@ extern "C"
     printf("dst_codec_name: %s\n", dst_codec_name);
 
     // Create input AVIOContext
-    struct BufferData bd = {array, size, 0};
-    printf("size: %zu\n", bd.size);
-    std::vector<uint8_t> input_buffer(1);
-    auto avio_ctx = avio_alloc_context(input_buffer.data(), input_buffer.size(), 0, &bd, &custom_io_read, nullptr, &custom_seek);
+    struct ReadBufferData in_bd = {array, size, 0};
+    size_t in_ctx_buf_size = 1;
+    uint8_t *in_ctx_buf = (uint8_t *)malloc(in_ctx_buf_size);
+    auto avio_ctx = avio_alloc_context(in_ctx_buf, in_ctx_buf_size, 0, &in_bd, &custom_io_read, nullptr, &custom_seek);
 
     // Initialize input format context
     AVFormatContext *input_ctx = avformat_alloc_context();
@@ -138,7 +153,6 @@ extern "C"
     const AVInputFormat *input_format = throw_if_null(av_find_input_format(src_format_short_name), "Could not find input format");
     throw_if_neg(avformat_open_input(&input_ctx, nullptr, input_format, nullptr), "Could not open input format context");
     throw_if_neg(avformat_find_stream_info(input_ctx, nullptr), "Could not find stream information");
-    printf("duration %d\n", input_ctx->duration);
     throw_if_neg(input_ctx->pb->error, "Error in PB IO");
 
     // Initialize output format context
@@ -179,8 +193,10 @@ extern "C"
     throw_if_neg(avcodec_parameters_from_context(out_stream->codecpar, enc_ctx), "Failed to copy destination codec parameters");
 
     // Create a custom IO context for writing the output
-    std::vector<uint8_t> output_buffer(1);
-    AVIOContext *output_avio_ctx = avio_alloc_context(output_buffer.data(), output_buffer.size(), 1, nullptr, nullptr, &custom_io_write, &custom_seek);
+    size_t out_ctx_buf_size = 1;
+    uint8_t *out_ctx_buf = (uint8_t *)malloc(out_ctx_buf_size);
+    struct WriteBufferData out_bd = {nullptr, 0, 0};
+    AVIOContext *output_avio_ctx = avio_alloc_context(out_ctx_buf, out_ctx_buf_size, 1, &out_bd, nullptr, &custom_io_write, &custom_seek);
     output_ctx->pb = output_avio_ctx;
 
     // Write header
@@ -273,14 +289,9 @@ extern "C"
     // Write trailer and cleanup
     throw_if_neg(av_write_trailer(output_ctx), "Failed to write trailer");
 
-    // Copy the transcoded audio data back to the input array
-    output_buffer.resize(output_avio_ctx->pos);
-
     struct Result *r = static_cast<Result *>(malloc(sizeof(struct Result)));
-    printf("sizeof(struct Result) %zu\n", sizeof(struct Result));
-    printf("transcoded ended, size: %zu\n", result.size());
-    r->out_ptr = result.data();
-    r->size = result.size();
+    r->out_ptr = out_bd.ptr;
+    r->size = out_bd.size;
     r->sample_rate = enc_ctx->sample_rate;
 
     // Cleanup
@@ -293,13 +304,11 @@ extern "C"
     avcodec_close(enc_ctx);
     avcodec_free_context(&enc_ctx);
 
-    // avformat_close_input(&input_ctx);
-    // avformat_free_context(input_ctx);
+    avformat_close_input(&input_ctx);
+    avformat_free_context(input_ctx);
 
     avformat_close_input(&output_ctx);
     avformat_free_context(output_ctx);
-    printf("transcoded ended, size: %zu\n", r->size);
-    printf("transcoded ended, size: %zu\n", result.size());
     return r;
   }
 }

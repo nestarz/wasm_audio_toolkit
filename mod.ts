@@ -87,7 +87,7 @@ export const transcode = async (
   return { data, ...res };
 };
 
-// const data = await fetch(new URL("dist/out.mp4", import.meta.url))
+// const data = await fetch(new URL("output.mp4", import.meta.url))
 //   .then((r) => r.arrayBuffer())
 //   .then((buffer) => new Uint8Array(buffer))
 //   .then(async (data) => {
@@ -121,7 +121,7 @@ if (import.meta.main) {
     Deno.writeFile("./dist/out.aac", data)
   );
   await transcode(data, "wav", "mp4", "libfdk_aac", {
-   // movflags: "+faststart+frag_keyframe+empty_moov",
+    movflags: "+frag_keyframe+empty_moov",
   }).then(({ data }) => Deno.writeFile("./dist/out.mp4", data));
   // await transcode(data, "wav", "ogg", "libopus").then(({ data }) =>
   //   Deno.writeFile("./dist/out.ogg", data)
