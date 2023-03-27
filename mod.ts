@@ -1,9 +1,4 @@
 import ModuleFactory from "./dist/main.js";
-import { createDecoder } from "https://raw.githubusercontent.com/bashi/minimp3-wasm/master/src/minimp3-wasm.ts";
-import { addWaveHeader } from "https://deno.land/x/wave_header/mod.ts";
-
-const wasmPath =
-  "https://raw.githubusercontent.com/bashi/minimp3-wasm/master/dist/decoder.opt.wasm";
 
 const createMalloc = (handler) => {
   const cleanSet = [];
@@ -24,13 +19,21 @@ const createMalloc = (handler) => {
   ];
 };
 
-export const probe = async (avArray: Uint8Array, sourceContainer: string) => {
+export const probe = async (
+  avArray: Uint8Array,
+  sourceContainer: string,
+  verbose = 0
+) => {
   const handler = await ModuleFactory({ INITIAL_MEMORY: 128 * 1024 * 1024 });
   const [malloc, free] = createMalloc(handler);
   const [avArrayPtr, size] = malloc(avArray);
   const [sourceContainerPtr] = malloc(sourceContainer);
-  console.log(size);
-  const structPtr = handler._probe(avArrayPtr, size, sourceContainerPtr);
+  const structPtr = handler._probe(
+    avArrayPtr,
+    size,
+    sourceContainerPtr,
+    verbose
+  );
   const view = new DataView(handler.HEAPU8.buffer, structPtr, 18);
   const res = {
     outPtr: view.getUint32(0, true),
@@ -51,6 +54,7 @@ export const transcode = async (
   destContainer: string,
   destCodec: string,
   destContainerOptions?: Record<string, string>,
+  verbose = 0,
   initialMemory: number = 128 * 1024 * 1024
 ) => {
   const destContainerOptionsString = destContainerOptions
@@ -71,65 +75,19 @@ export const transcode = async (
     sourceContainerPtr,
     destContainerPtr,
     destCodecPtr,
-    destContainerOptionsPtr
+    destContainerOptionsPtr,
+    verbose
   );
-  const view = new DataView(handler.HEAPU8.buffer, structPtr, 10);
+  const view = new DataView(handler.HEAPU8.buffer, structPtr, 18);
   const res = {
     outPtr: view.getUint32(0, true),
     size: view.getUint32(4, true),
     sample_rate: view.getUint16(8, true),
+    duration: view.getUint16(14, true),
   };
   const data = new Uint8Array(
     new Uint8Array(handler.HEAPU8.buffer, res.outPtr, res.size)
   );
-  console.log(data);
   free();
   return { data, ...res };
 };
-
-// const data = await fetch(new URL("output.mp4", import.meta.url))
-//   .then((r) => r.arrayBuffer())
-//   .then((buffer) => new Uint8Array(buffer))
-//   .then(async (data) => {
-//     const { sampleRate, numChannels } = await probe(data, "mov");
-//   });
-
-if (import.meta.main) {
-  const data = await fetch(
-    new URL(
-      "radio/assets/Extreme-Trax-Final-Fantasy-CaRaVEL-EDIT.wav",
-      import.meta.url
-    )
-  )
-    .then((r) => r.arrayBuffer())
-    .then((buffer) => new Uint8Array(buffer))
-    .then(async (data) => {
-      const { sampleRate, numChannels } = await probe(data, "wav");
-      console.log(sampleRate, numChannels);
-      const chunkSize = 1920000;
-      const start = chunkSize * 30;
-      return new Uint8Array(
-        addWaveHeader(
-          new Int16Array(data.slice(start, start + chunkSize).buffer),
-          numChannels,
-          sampleRate,
-          16
-        ).buffer
-      );
-    });
-  await transcode(data, "wav", "adts", "libfdk_aac").then(({ data }) =>
-    Deno.writeFile("./dist/out.aac", data)
-  );
-  await transcode(data, "wav", "mp4", "libfdk_aac", {
-    movflags: "+dash+delay_moov+skip_sidx+skip_trailer",
-  }).then(({ data }) => Deno.writeFile("./dist/out.mp4", data));
-  // await transcode(data, "wav", "ogg", "libopus").then(({ data }) =>
-  //   Deno.writeFile("./dist/out.ogg", data)
-  // );
-  // await transcode(data, "wav", "mp2", "mp2").then(({ data }) =>
-  //   Deno.writeFile("./dist/out.mp2", data)
-  // );
-  // await transcode(data, "wav", "webm", "libopus").then(({ data }) =>
-  //   Deno.writeFile("./dist/out.webm", data)
-  // );
-}

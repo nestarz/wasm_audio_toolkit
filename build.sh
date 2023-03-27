@@ -176,4 +176,4 @@ class XMLHttpRequest{open(t,e){"GET"!=t&&console.error("Method not implemented:"
 EOF
 
 echo "Build complete"
-deno run -A mod.ts
+deno run -A tests.ts

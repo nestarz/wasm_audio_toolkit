@@ -93,7 +93,6 @@ int find_nearest(const int *raw_arr, const int target)
   int nearest = *std::min_element(raw_arr, std::find(raw_arr, raw_arr + 100, 0),
                                   [&](int a, int b)
                                   { return std::abs(a - target) < std::abs(b - target); });
-  printf("target: %d, nearest: %d\n", target, nearest);
   return nearest;
 }
 
@@ -111,7 +110,7 @@ struct Result
 extern "C"
 {
   EMSCRIPTEN_KEEPALIVE
-  Result *probe(const uint8_t *array, const size_t size, const char *src_format_short_name)
+  Result *probe(const uint8_t *array, const size_t size, const char *src_format_short_name, const int verbose)
   {
     struct ReadBufferData in_bd = {array, size, 0};
     size_t in_ctx_buf_size = 1;
@@ -129,16 +128,17 @@ extern "C"
     r->bit_depth = codecParams->bits_per_raw_sample > 0 ? codecParams->bits_per_raw_sample : 16;
     r->frame_size = codecParams->frame_size;
     r->sample_rate = codecParams->sample_rate;
-    r->duration = input_ctx->streams[0]->duration;
+    r->duration = (int)(input_ctx->duration * av_q2d(AV_TIME_BASE_Q) * 1000);
     return r;
   };
   EMSCRIPTEN_KEEPALIVE
   Result *transcode(const uint8_t *array, const size_t size, const char *src_format_short_name,
                     const char *dst_format_short_name, const char *dst_codec_name,
-                    const char *dst_container_options)
+                    const char *dst_container_options, const int verbose)
   {
-    printf("dst_format_short_name: %s %s\n", dst_format_short_name, dst_container_options);
-    printf("dst_codec_name: %s\n", dst_codec_name);
+    if (verbose > 0)
+      printf("dst_format_short_name: %s %s dst_codec_name: %s\n", dst_format_short_name,
+             dst_container_options, dst_codec_name);
 
     // Create input AVIOContext
     struct ReadBufferData in_bd = {array, size, 0};
@@ -184,12 +184,11 @@ extern "C"
       {
         char *key = strtok(strdup(line), ":");
         char *value = strtok(key + strlen(key) + 1, ":");
-        printf("key: %s\tvalue: %s\n", key, value);
+        if (verbose > 0)
+          printf("key: %s\tvalue: %s\n", key, value);
         av_dict_set(&codec_opts, key, value, 0);
       }
     throw_if_neg(avcodec_open2(enc_ctx, enc_codec, nullptr), "Failed to open destination codec");
-    printf("computed enc_ctx->bit_rate: %lld\n", enc_ctx->bit_rate);
-
     throw_if_neg(avcodec_parameters_from_context(out_stream->codecpar, enc_ctx), "Failed to copy destination codec parameters");
 
     // Create a custom IO context for writing the output
@@ -250,7 +249,8 @@ extern "C"
         out_frame->pts = av_rescale_q(frame->pts, in_stream->time_base, out_stream->time_base);
         throw_if_neg(av_channel_layout_copy(&out_frame->ch_layout, &enc_ctx->ch_layout), "Could not select channel layout");
         throw_if_neg(av_frame_get_buffer(out_frame, 0), "Failed to allocate output frame buffer");
-        // printf("enc_ctx->frame_size: %d, frame->nb_samples: %d\n", enc_ctx->frame_size, frame->nb_samples);
+        if (verbose > 1)
+          printf("enc_ctx->frame_size: %d, frame->nb_samples: %d\n", enc_ctx->frame_size, frame->nb_samples);
         throw_if_neg(swr_convert(swr_ctx, out_frame->data, enc_ctx->frame_size, (const uint8_t **)frame->data, frame->nb_samples), "Failed to resample frame");
 
         // sends an uncompressed frame from the encoder to the muxer (muxer2) for encoding
@@ -275,8 +275,10 @@ extern "C"
       av_packet_unref(pkt);
     }
 
-    av_dump_format(input_ctx, 0, "<input>", 0);
-    av_dump_format(output_ctx, 0, "<output>", 1);
+    if (verbose > 0)
+      av_dump_format(input_ctx, 0, "<input>", 0);
+    if (verbose > 0)
+      av_dump_format(output_ctx, 0, "<output>", 1);
 
     // Flush encoder
     throw_if_neg(avcodec_send_frame(enc_ctx, nullptr), "Failed to send empty frame to encoder");
@@ -293,6 +295,7 @@ extern "C"
     r->out_ptr = out_bd.ptr;
     r->size = out_bd.size;
     r->sample_rate = enc_ctx->sample_rate;
+    r->duration = (int)(input_ctx->duration * av_q2d(AV_TIME_BASE_Q) * 1000);
 
     // Cleanup
     swr_free(&swr_ctx);
