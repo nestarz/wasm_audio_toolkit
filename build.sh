@@ -7,6 +7,8 @@ OPUS_BUILD="$(pwd)/build/opus"
 OPUS_SOURCE="$(pwd)/deps/opus"
 FDKAAC_BUILD="$(pwd)/build/fdk-aac"
 FDKAAC_SOURCE="$(pwd)/deps/fdk-aac"
+LAME_BUILD="$(pwd)/build/lame"
+LAME_SOURCE="$(pwd)/deps/lame"
 
 function ask_remove_folder {
   read -p "Do you want to remove $1? (y/n) " answer &&
@@ -36,6 +38,26 @@ ask_remove_folder $FDKAAC_BUILD
   emmake make -C $FDKAAC_SOURCE install -j
 )
 
+ask_remove_folder $LAME_BUILD
+[ -d $LAME_BUILD ] || (
+  rm -rf $LAME_BUILD || true
+  mkdir -p $LAME_BUILD
+  cd $LAME_BUILD
+  CONF_FLAGS=(
+    --prefix=$LAME_BUILD          # install library in a build directory for FFmpeg to include
+    --host=i686-linux             # use i686 linux
+    --disable-shared              # disable shared library
+    --disable-frontend            # exclude lame executable
+    --disable-analyzer-hooks      # exclude analyzer hooks
+    --disable-dependency-tracking # speed up one-time build
+    --disable-gtktest
+  )
+  echo "CONF_FLAGS=${CONF_FLAGS[@]}"
+  (cd $LAME_SOURCE && CFLAGS=$CFLAGS emconfigure ./configure "${CONF_FLAGS[@]}")
+  emmake make -C $LAME_SOURCE clean
+  emmake make -C $LAME_SOURCE install -j
+)
+
 ask_remove_folder $OPUS_BUILD
 [ -d $OPUS_BUILD ] || (
   rm -rf $OPUS_BUILD || true
@@ -63,9 +85,9 @@ ask_remove_folder $FFMPEG_BUILD
 [ -d $FFMPEG_BUILD ] || (
   mkdir -p $FFMPEG_BUILD
   cd $FFMPEG_SOURCE
-  export CFLAGS="-I/opt/homebrew/include -I$OPUS_BUILD/include -I$FDKAAC_BUILD/include"
-  export LDFLAGS="-L$OPUS_BUILD/lib -L$FDKAAC/lib -s INITIAL_MEMORY=33554432" # -L${PREFIX}/lib
-  export EM_PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$OPUS_BUILD/lib/pkgconfig:$FDKAAC_BUILD/lib/pkgconfig"
+  export CFLAGS="-I/opt/homebrew/include -I$OPUS_BUILD/include -I$FDKAAC_BUILD/include -I$LAME_BUILD/include"
+  export LDFLAGS="-L$OPUS_BUILD/lib -L$FDKAAC_BUILD/lib -L$LAME_BUILD/lib -s INITIAL_MEMORY=33554432" # -L${PREFIX}/lib
+  export EM_PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$OPUS_BUILD/lib/pkgconfig:$FDKAAC_BUILD/lib/pkgconfig:$LAME_BUILD/lib/pkgconfig"
   replace "if (read_random" "return get_generic_seed(); \/\* _NOSYS_ \*\/" "$FFMPEG_SOURCE/libavutil/random_seed.c"
   emconfigure ./configure \
     --prefix=$FFMPEG_BUILD \
@@ -116,18 +138,23 @@ ask_remove_folder $FFMPEG_BUILD
     --enable-avcodec \
     --enable-swresample \
     --enable-avformat \
+    --enable-avfilter \
+    --enable-filter=anull \
     \
     --enable-libopus \
     --enable-libfdk-aac \
-    --enable-encoder=libopus,libfdk_aac,mp2 \
-    --enable-muxer=webm,ogg,adts,mp2
+    --enable-libmp3lame \
+    --enable-encoder=libopus,libfdk_aac,mp2,pcm_s16le,libmp3lame \
+    --enable-decoder=libopus,libfdk_aac,mp2,pcm_s16le,mp3 \
+    --enable-muxer=wav,webm,ogg,adts,mp2,mp3,mp4 \
+    --enable-demuxer=wav,webm,ogg,aac,mp2,mp3,mov
   # \
   #
   emmake make -j8
   emmake make install
 )
 
-em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
+em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a $LAME_BUILD/lib/*.a \
   -I $FFMPEG_BUILD/include \
   -o ./dist/main.js \
   -s STRICT=1 \
@@ -139,7 +166,7 @@ em++ main.cpp $FFMPEG_BUILD/lib/*.a $OPUS_BUILD/lib/*.a $FDKAAC_BUILD/lib/*.a \
   -s IMPORTED_MEMORY \
   -s MALLOC=emmalloc \
   -s USE_ES6_IMPORT_META=1 \
-  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_encode_mux']" \
+  -s EXPORTED_FUNCTIONS="['_malloc', '_free', '_transcode']" \
   -s EXPORTED_RUNTIME_METHODS=stringToUTF8 \
   -g4 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=1 -s DEMANGLE_SUPPORT=1 \
   -s NO_DISABLE_EXCEPTION_CATCHING
@@ -149,4 +176,4 @@ class XMLHttpRequest{open(t,e){"GET"!=t&&console.error("Method not implemented:"
 EOF
 
 echo "Build complete"
-deno run -A mod.ts
+deno run -A tests.ts

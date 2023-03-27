@@ -66,6 +66,12 @@
     "unordered_map": "cpp",
     "variant": "cpp",
     "__verbose_abort": "cpp",
-    "algorithm": "cpp"
+    "algorithm": "cpp",
+    "filesystem": "cpp",
+    "deque": "cpp",
+    "stack": "cpp",
+    "fstream": "cpp",
+    "strstream": "cpp",
+    "__memory": "cpp"
   }
 }
